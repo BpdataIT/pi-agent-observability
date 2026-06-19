@@ -181,6 +181,11 @@ function apiUrl(path, params = {}) {
 
 // ─── Model context windows (approximate) ────────────────────────────
 const MODEL_CONTEXT_WINDOWS = [
+  // 1M-context Claude variants. Opus 4.8 ships with a 1M window by default;
+  // some models also carry an explicit "[1m]" tag. These must precede the
+  // generic claude rules below since getContextWindow returns on first match.
+  [/\[1m\]/i, 1_000_000],
+  [/^claude-opus-4-8/i, 1_000_000],
   [/^claude-(haiku|sonnet|opus|3|4|5)/i, 200_000],
   [/^claude-/i, 200_000],
   [/^gpt-5/i, 400_000],

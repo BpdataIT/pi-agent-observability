@@ -26,9 +26,10 @@
 </p>
 
 1. **Pi extension** (`extension/`): drop it into any Pi agent with `-e` and it streams canonical lifecycle events (every turn, tool call, model change, cost line) to the server. Zero changes to the agent itself.
-2. **Observability dashboard** (`apps/observability/`): a Bun + SQLite server that ingests and persists those events, plus three browser views (**single** for one agent with full payloads, **swimlane** for N agents compared turn-by-turn, and **race** for who finished which step first) so you can A/B prompts and weigh the trifecta side by side.
-3. **Steelman product agent** (`apps/steelman/`): a real product app (investment bear-thesis analysis) running on an *observed* Pi agent, proving the telemetry holds up where it matters most: a product agent executing for real users, real money, real tools.
-4. **Plan prompts** (`.claude/skills/`): four spec skills that turn a prompt into an implementation plan with more *useful* tokens. The same skills your agents run under observation, so you can measure the trifecta across spec formats and pick the right one for the job:
+2. **Claude Code bridge** (`integrations/claude-code/`): register one hook script in `.claude/settings.json` and Claude Code sessions appear as their own lanes in the same dashboard, with correct token totals and cost. No server changes. See [`integrations/claude-code/README.md`](integrations/claude-code/README.md).
+3. **Observability dashboard** (`apps/observability/`): a Bun + SQLite server that ingests and persists those events, plus three browser views (**single** for one agent with full payloads, **swimlane** for N agents compared turn-by-turn, and **race** for who finished which step first) so you can A/B prompts and weigh the trifecta side by side.
+4. **Steelman product agent** (`apps/steelman/`): a real product app (investment bear-thesis analysis) running on an *observed* Pi agent, proving the telemetry holds up where it matters most: a product agent executing for real users, real money, real tools.
+5. **Plan prompts** (`.claude/skills/`): four spec skills that turn a prompt into an implementation plan with more *useful* tokens. The same skills your agents run under observation, so you can measure the trifecta across spec formats and pick the right one for the job:
    - `/spec`: markdown
    - `/htmlspec`: HTML
    - `/htmlvspec`: HTML + visuals (`gpt-image-2`)

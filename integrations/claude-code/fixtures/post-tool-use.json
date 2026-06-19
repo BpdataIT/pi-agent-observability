@@ -1,0 +1,15 @@
+{
+  "hook_event_name": "PostToolUse",
+  "session_id": "test-session-001",
+  "transcript_path": "/tmp/pi-obs-cc-test/test-session-001.jsonl",
+  "cwd": "/Users/tester/project",
+  "permission_mode": "auto",
+  "tool_name": "Read",
+  "tool_input": {
+    "file_path": "/Users/tester/project/README.md"
+  },
+  "tool_response": {
+    "type": "result",
+    "output": "# My Project\nThis is the README."
+  }
+}

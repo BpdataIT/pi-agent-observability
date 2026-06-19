@@ -183,6 +183,65 @@ htmlvping:
   pi "ping" --o-name v-plan
 
 # ═══════════════════════════════════════════════════════════════════════════
+#  CLAUDE CODE BRIDGE  —  print hooks block for .claude/settings.json
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Print the Claude Code hooks block with the current OBS_AUTH_TOKEN / OBS_SERVER_URL filled in.
+# Paste the output into ~/.claude/settings.json or <project>/.claude/settings.json.
+cc-hooks-print:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  abs_path="$PWD"
+  echo "# Add the following block to ~/.claude/settings.json or <project>/.claude/settings.json"
+  echo "# Current OBS_AUTH_TOKEN: {{obs_token}}"
+  echo "# Current OBS_SERVER_URL: {{obs_url}}"
+  echo ""
+  sed "s|/ABS/PATH|${abs_path}|g; /_instructions/d" "${abs_path}/integrations/claude-code/settings.template.json"
+
+# Print the Antigravity (agy) hooks.json with this repo's absolute path filled in.
+agy-hooks-print:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  abs_path="$PWD"
+  echo "# Install to ~/.gemini/config/hooks.json (NOT ~/.gemini/antigravity-cli/hooks.json)"
+  echo "# Current OBS_AUTH_TOKEN: {{obs_token}}  OBS_SERVER_URL: {{obs_url}}"
+  echo ""
+  sed "s|/ABS/PATH|${abs_path}|g; /_instructions/d" "${abs_path}/integrations/antigravity/hooks.template.json"
+
+# Install the Antigravity bridge hooks to ~/.gemini/config/hooks.json (the backend-synced path).
+# Refuses to clobber an existing hooks.json — back it up / merge by hand first.
+agy-install:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  abs_path="$PWD"
+  dest="$HOME/.gemini/config/hooks.json"
+  mkdir -p "$(dirname "$dest")"
+  if [ -e "$dest" ]; then
+    echo "✗ $dest already exists — refusing to overwrite."
+    echo "  Back it up or merge the 5 event entries from integrations/antigravity/hooks.template.json by hand."
+    echo "  (Preview with: just agy-hooks-print)"
+    exit 1
+  fi
+  sed "s|/ABS/PATH|${abs_path}|g; /_instructions/d" "${abs_path}/integrations/antigravity/hooks.template.json" > "$dest"
+  echo "✓ Installed agy hooks → $dest"
+  echo "  Now run agy with OBS_AUTH_TOKEN / OBS_SERVER_URL exported (or in .env)."
+
+# Remove the Antigravity bridge hooks from ~/.gemini/config/hooks.json.
+# Only removes the file if it points at this repo's obs-hook.ts (won't delete unrelated hooks).
+agy-uninstall:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  dest="$HOME/.gemini/config/hooks.json"
+  if [ ! -e "$dest" ]; then echo "Nothing to remove ($dest absent)."; exit 0; fi
+  if grep -q "integrations/antigravity/obs-hook.ts" "$dest"; then
+    rm -f "$dest"
+    echo "✓ Removed $dest"
+  else
+    echo "✗ $dest does not reference this bridge — leaving it untouched."
+    exit 1
+  fi
+
+# ═══════════════════════════════════════════════════════════════════════════
 #  EXTRA  —  build, validate, backup
 # ═══════════════════════════════════════════════════════════════════════════
 

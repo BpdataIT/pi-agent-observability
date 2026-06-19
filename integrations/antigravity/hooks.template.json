@@ -1,0 +1,31 @@
+{
+  "_instructions": "Antigravity (agy) hooks config. INSTALL TO ~/.gemini/config/hooks.json (the backend-synced path — NOT ~/.gemini/antigravity-cli/hooks.json, which the TUI displays but never executes). Replace /ABS/PATH with the absolute path to your pi-agent-observability clone, and remove this _instructions key. agy passes no event name on stdin, so each command passes it as the first argument.",
+  "hooks": {
+    "enabled": true,
+    "PreToolUse": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          { "type": "command", "command": "bun /ABS/PATH/integrations/antigravity/obs-hook.ts PreToolUse", "timeout": 0 }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          { "type": "command", "command": "bun /ABS/PATH/integrations/antigravity/obs-hook.ts PostToolUse", "timeout": 0 }
+        ]
+      }
+    ],
+    "PreInvocation": [
+      { "type": "command", "command": "bun /ABS/PATH/integrations/antigravity/obs-hook.ts PreInvocation", "timeout": 0 }
+    ],
+    "PostInvocation": [
+      { "type": "command", "command": "bun /ABS/PATH/integrations/antigravity/obs-hook.ts PostInvocation", "timeout": 0 }
+    ],
+    "Stop": [
+      { "type": "command", "command": "bun /ABS/PATH/integrations/antigravity/obs-hook.ts Stop", "timeout": 0 }
+    ]
+  }
+}

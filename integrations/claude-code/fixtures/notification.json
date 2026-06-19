@@ -1,0 +1,8 @@
+{
+  "hook_event_name": "Notification",
+  "session_id": "test-session-001",
+  "transcript_path": "/tmp/pi-obs-cc-test/test-session-001.jsonl",
+  "cwd": "/Users/tester/project",
+  "permission_mode": "auto",
+  "message": "Claude Code is waiting for your input."
+}

@@ -1,0 +1,98 @@
+{
+  "_instructions": "Replace /ABS/PATH with the absolute path to your pi-agent-observability clone. E.g. /Users/you/repos/pi-agent-observability. Remove this _instructions key before use.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bun /ABS/PATH/integrations/claude-code/obs-hook.ts"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bun /ABS/PATH/integrations/claude-code/obs-hook.ts"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bun /ABS/PATH/integrations/claude-code/obs-hook.ts"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bun /ABS/PATH/integrations/claude-code/obs-hook.ts"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bun /ABS/PATH/integrations/claude-code/obs-hook.ts"
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bun /ABS/PATH/integrations/claude-code/obs-hook.ts"
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bun /ABS/PATH/integrations/claude-code/obs-hook.ts"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bun /ABS/PATH/integrations/claude-code/obs-hook.ts"
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bun /ABS/PATH/integrations/claude-code/obs-hook.ts"
+          }
+        ]
+      }
+    ]
+  }
+}
