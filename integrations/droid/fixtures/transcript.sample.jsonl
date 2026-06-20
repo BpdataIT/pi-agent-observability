@@ -1,0 +1,8 @@
+{"type":"session_start","id":"sess-001","title":"Test session","cwd":"/Users/tester/project","version":2}
+{"type":"message","id":"msg-user-1","timestamp":"2026-06-18T20:10:00.000Z","message":{"role":"user","content":[{"type":"text","text":"Review the project structure"}]}}
+{"type":"message","id":"msg-asst-1","timestamp":"2026-06-18T20:11:31.361Z","parentId":"msg-user-1","message":{"role":"assistant","modelId":"glm-5.2","content":[{"type":"thinking","thinking":"Let me list the directory first.","durationMs":1500},{"type":"tool_use","id":"chatcmpl-tool-abc123","name":"LS","input":{"directory_path":"/Users/tester/project"}}]}}
+{"type":"message","id":"msg-user-2","timestamp":"2026-06-18T20:12:00.000Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"chatcmpl-tool-abc123","is_error":false,"content":"total 512\ndrwxr-xr-x  20 tester staff  640 Jun 18 20:00 src"}]}}
+{"type":"message","id":"msg-asst-2","timestamp":"2026-06-18T20:13:00.000Z","parentId":"msg-user-2","message":{"role":"assistant","modelId":"gemini-3.5-flash","content":[{"type":"text","text":"Here is my analysis of the project structure."}]}}
+{"type":"message","id":"msg-user-3","timestamp":"2026-06-18T20:14:00.000Z","message":{"role":"user","content":[{"type":"text","text":"Thanks, summarize"}]}}
+{"type":"message","id":"msg-asst-3","timestamp":"2026-06-18T20:15:00.000Z","parentId":"msg-user-3","message":{"role":"assistant","modelId":"gpt-5.5","content":[{"type":"text","text":"Summary: the project looks good."}]}}
+{"type":"todo_state","id":"todo-1","timestamp":"2026-06-18T20:15:01.000Z","todos":{"todos":"1. [done] Review project"}}

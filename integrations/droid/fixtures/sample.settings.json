@@ -1,0 +1,23 @@
+{
+  "model": "glm-5.2",
+  "reasoningEffort": "high",
+  "assistantActiveTimeMs": 6170630,
+  "tokenUsage": {
+    "inputTokens": 1000,
+    "outputTokens": 200,
+    "cacheCreationTokens": 50,
+    "cacheReadTokens": 500,
+    "thinkingTokens": 10,
+    "factoryCredits": 1567347
+  },
+  "inclusiveTokenUsage": {
+    "inputTokens": 1500,
+    "outputTokens": 300,
+    "cacheCreationTokens": 75,
+    "cacheReadTokens": 750,
+    "thinkingTokens": 15,
+    "factoryCredits": 2536403
+  },
+  "providerLock": "factory",
+  "autonomyMode": "auto-high"
+}

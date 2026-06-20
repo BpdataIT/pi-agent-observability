@@ -12,6 +12,7 @@ obs_url := env_var_or_default("OBS_SERVER_URL", "http://127.0.0.1:" + obs_port)
 # install` refreshes both the pi extension AND the agy hooks. Override with
 # AGY_HOOKS_SRC=... (e.g. your working repo $PWD) to point elsewhere.
 agy_hooks_src := env_var_or_default("AGY_HOOKS_SRC", "~/.pi/agent/git/github.com/BpdataIT/pi-agent-observability")
+droid_hooks_src := env_var_or_default("DROID_HOOKS_SRC", "~/.pi/agent/git/github.com/BpdataIT/pi-agent-observability")
 steelman_port := env_var_or_default("STEELMAN_PORT", "45210")
 steelman_web_port := env_var_or_default("STEELMAN_WEB_PORT", "51730")
 steelman_api_target := env_var_or_default("STEELMAN_API_TARGET", "http://127.0.0.1:" + steelman_port)
@@ -280,6 +281,74 @@ agy-uninstall:
 # trusting it in the live hook. Findings: integrations/antigravity/usage-decoder.md
 agy-usage-validate:
   bun scripts/agy-usage-validate.ts
+
+# Print the Factory Droid hooks.json with the resolved hook source path filled in.
+droid-hooks-print:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  src="{{droid_hooks_src}}"
+  abs_path="$(eval echo "${src}")"
+  if [ ! -d "${abs_path}" ]; then
+    echo "✗ DROID_HOOKS_SRC does not resolve to a directory: ${abs_path}" >&2
+    echo "  Set DROID_HOOKS_SRC to your pi-agent-observability clone" >&2
+    echo "  (default ~/.pi/agent/git/github.com/BpdataIT/pi-agent-observability)" >&2
+    exit 1
+  fi
+  bun_bin="$(command -v bun)"
+  if [ -z "${bun_bin}" ]; then
+    echo "✗ bun not found on PATH" >&2
+    exit 1
+  fi
+  echo "# Install to ~/.factory/hooks.json (global) or <project>/.factory/hooks.json"
+  echo "# droid hook source: ${abs_path}"
+  echo "# bun: ${bun_bin}"
+  echo "# Current OBS_AUTH_TOKEN: {{obs_token}}  OBS_SERVER_URL: {{obs_url}}"
+  echo ""
+  sed "s|/ABS/PATH|${abs_path}|g; s|^bun |${bun_bin} |g; /_instructions/d" "${abs_path}/integrations/droid/hooks.template.json"
+
+# Install the Factory Droid bridge hooks to ~/.factory/hooks.json.
+droid-install:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  src="{{droid_hooks_src}}"
+  abs_path="$(eval echo "${src}")"
+  if [ ! -d "${abs_path}" ]; then
+    echo "✗ DROID_HOOKS_SRC does not resolve to a directory: ${abs_path}" >&2
+    echo "  Set DROID_HOOKS_SRC to your pi-agent-observability clone" >&2
+    echo "  (default ~/.pi/agent/git/github.com/BpdataIT/pi-agent-observability)" >&2
+    exit 1
+  fi
+  bun_bin="$(command -v bun)"
+  if [ -z "${bun_bin}" ]; then
+    echo "✗ bun not found on PATH" >&2
+    exit 1
+  fi
+  dest="$HOME/.factory/hooks.json"
+  mkdir -p "$(dirname "$dest")"
+  if [ -e "$dest" ]; then
+    echo "✗ $dest already exists — refusing to overwrite."
+    echo "  Back it up or merge the hook entries from integrations/droid/hooks.template.json by hand."
+    echo "  (Preview with: just droid-hooks-print)"
+    exit 1
+  fi
+  sed "s|/ABS/PATH|${abs_path}|g; s|^bun |${bun_bin} |g; /_instructions/d" "${abs_path}/integrations/droid/hooks.template.json" > "$dest"
+  echo "✓ Installed droid hooks → $dest"
+  echo "  hook source: ${abs_path}"
+  echo "  Now run droid with OBS_AUTH_TOKEN / OBS_SERVER_URL exported (or in .env)."
+
+# Remove the Factory Droid bridge hooks from ~/.factory/hooks.json.
+droid-uninstall:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  dest="$HOME/.factory/hooks.json"
+  if [ ! -e "$dest" ]; then echo "Nothing to remove ($dest absent)."; exit 0; fi
+  if grep -q "integrations/droid/obs-hook.ts" "$dest"; then
+    rm -f "$dest"
+    echo "✓ Removed $dest"
+  else
+    echo "✗ $dest does not reference this bridge — leaving it untouched."
+    exit 1
+  fi
 
 # Lossy-normalizer self-test for shared/model-metadata.ts (Stories 2.2 + 3.3).
 # Pins the known-lossy label↔id pairs (e.g. "Gemini 3.5 Flash (High)" vs

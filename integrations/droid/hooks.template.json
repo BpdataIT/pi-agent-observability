@@ -1,0 +1,71 @@
+{
+  "_instructions": "Factory Droid hooks config. INSTALL TO ~/.factory/hooks.json (global) or <project>/.factory/hooks.json (project). Replace /ABS/PATH with the absolute path to your pi-agent-observability clone. For project-relative paths you can use $FACTORY_PROJECT_DIR. Remove this _instructions key before use. Droid passes hook_event_name on stdin — no positional argv needed.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "*",
+        "hooks": [
+          { "type": "command", "command": "bun /ABS/PATH/integrations/droid/obs-hook.ts" }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          { "type": "command", "command": "bun /ABS/PATH/integrations/droid/obs-hook.ts" }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          { "type": "command", "command": "bun /ABS/PATH/integrations/droid/obs-hook.ts" }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          { "type": "command", "command": "bun /ABS/PATH/integrations/droid/obs-hook.ts" }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          { "type": "command", "command": "bun /ABS/PATH/integrations/droid/obs-hook.ts" }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          { "type": "command", "command": "bun /ABS/PATH/integrations/droid/obs-hook.ts" }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          { "type": "command", "command": "bun /ABS/PATH/integrations/droid/obs-hook.ts" }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          { "type": "command", "command": "bun /ABS/PATH/integrations/droid/obs-hook.ts" }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "hooks": [
+          { "type": "command", "command": "bun /ABS/PATH/integrations/droid/obs-hook.ts" }
+        ]
+      }
+    ]
+  }
+}

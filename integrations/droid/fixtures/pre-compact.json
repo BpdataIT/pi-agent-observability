@@ -1,0 +1,9 @@
+{
+  "hook_event_name": "PreCompact",
+  "session_id": "test-session-droid-001",
+  "transcript_path": "/tmp/pi-obs-droid-test/test-session-droid-001.jsonl",
+  "cwd": "/Users/tester/project",
+  "permission_mode": "auto",
+  "trigger": "auto",
+  "custom_instructions": ""
+}

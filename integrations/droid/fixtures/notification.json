@@ -1,0 +1,8 @@
+{
+  "hook_event_name": "Notification",
+  "session_id": "test-session-droid-001",
+  "transcript_path": "/tmp/pi-obs-droid-test/test-session-droid-001.jsonl",
+  "cwd": "/Users/tester/project",
+  "permission_mode": "auto",
+  "message": "Droid is waiting for your input."
+}
