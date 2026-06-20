@@ -186,6 +186,14 @@ export interface AssistantMessagePayload {
   /** usage.output / (generation_ms / 1000), int-rounded. Missing on non-streaming turns. */
   output_tps?: number;
   turn_index?: number;
+  /**
+   * Model context window (denominator for the context utilization bar),
+   * sourced from pi's ctx.getContextUsage().contextWindow at message_end —
+   * the same value pi's /context command reports. Present on events emitted
+   * by extension versions that capture it; absent on legacy events (UI falls
+   * back to its MODEL_CONTEXT_WINDOWS regex table).
+   */
+  context_window?: number;
 }
 
 export interface ToolCallPayload {

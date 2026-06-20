@@ -215,7 +215,22 @@ export function prepare(db: Database): PreparedQueries {
       (COALESCE(json_extract(payload_json, '$.usage.input'),       0)
      + COALESCE(json_extract(payload_json, '$.usage.cache_read'),  0)
      + COALESCE(json_extract(payload_json, '$.usage.cache_write'), 0)) AS latest_input,
-      ts AS latest_ts
+      ts AS latest_ts,
+      -- Latest model context window reported by the extension
+      -- (ctx.getContextUsage().contextWindow, same source as pi's /context).
+      -- Sourced from the most recent assistant_message that carries it, so
+      -- mid-session model switches are reflected. NULL for legacy events
+      -- recorded before context_window capture — the UI falls back to its
+      -- MODEL_CONTEXT_WINDOWS regex table in that case.
+      (
+        SELECT json_extract(e2.payload_json, '$.context_window')
+        FROM events e2
+        WHERE e2.session_id = $session_id
+          AND e2.type = 'assistant_message'
+          AND json_extract(e2.payload_json, '$.context_window') IS NOT NULL
+        ORDER BY e2.seq DESC
+        LIMIT 1
+      ) AS context_window
     FROM events
     WHERE session_id = $session_id
       AND type = 'assistant_message'

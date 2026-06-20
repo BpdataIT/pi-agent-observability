@@ -375,6 +375,9 @@ async function handle(req: Request): Promise<Response> {
         error_count: row.error_count ?? 0,
         latest_input: ctx?.latest_input ?? null,
         latest_ts: ctx?.latest_ts ?? null,
+        // Model context window from the most recent assistant_message that
+        // reported it (see db.ts getSessionContext). null for legacy events.
+        context_window: ctx?.context_window != null ? Number(ctx.context_window) : null,
       });
     } catch (err: any) {
       return jsonResponse({ error: err.message }, 500);

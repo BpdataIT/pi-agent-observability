@@ -622,7 +622,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   // ━━ message_end (assistant_message & thinking) ━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  pi.on("message_end", async (event, _ctx) => {
+  pi.on("message_end", async (event, ctx) => {
     if (!queue || !sessionInfo) return;
     if (event.message?.role !== "assistant") return;
 
@@ -687,6 +687,15 @@ export default function (pi: ExtensionAPI) {
     turnStartTimes.delete(activeTurnIndex);
     firstTokenTimes.delete(activeTurnIndex);
 
+    // Context window for the active model, from the same source pi's
+    // /context command uses (ctx.getContextUsage()). Falls back to the
+    // model registry value if the usage estimate isn't ready yet. Stored
+    // on the event so the UI can render the context bar denominator
+    // without a hardcoded per-model guess table.
+    const contextUsage = ctx.getContextUsage();
+    const context_window =
+      contextUsage?.contextWindow ?? ctx.model?.contextWindow;
+
     const payload: AssistantMessagePayload = {
       text,
       thinking,
@@ -699,6 +708,7 @@ export default function (pi: ExtensionAPI) {
       generation_ms,
       output_tps,
       turn_index: activeTurnIndex,
+      context_window,
     };
 
     queue.push(createEventEnvelope("assistant_message", payload, sessionInfo));

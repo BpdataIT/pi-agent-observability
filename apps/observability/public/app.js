@@ -268,7 +268,13 @@ function computeAgentInfo(sid) {
     if (latestInput != null && latestPrefillMs != null && latestOutputTps != null) break;
   }
 
-  const contextTotal = getContextWindow(s.model);
+  // Context window denominator: prefer the value captured from pi's
+  // ctx.getContextUsage() at message_end (same source as /context), stored
+  // on the assistant_message event and surfaced via stats.context_window.
+  // Fall back to the MODEL_CONTEXT_WINDOWS regex table only for legacy
+  // events recorded before the extension captured context_window.
+  const storedContextWindow = stats.context_window ?? null;
+  const contextTotal = storedContextWindow != null ? storedContextWindow : getContextWindow(s.model);
   const contextUsed = latestInput || 0;
   const contextRemaining = Math.max(0, contextTotal - contextUsed);
   const contextRemainingPct = contextTotal ? Math.round((contextRemaining / contextTotal) * 100) : 0;
