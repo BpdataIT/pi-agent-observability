@@ -304,7 +304,7 @@ droid-hooks-print:
   echo "# bun: ${bun_bin}"
   echo "# Current OBS_AUTH_TOKEN: {{obs_token}}  OBS_SERVER_URL: {{obs_url}}"
   echo ""
-  sed "s|/ABS/PATH|${abs_path}|g; s|^bun |${bun_bin} |g; /_instructions/d" "${abs_path}/integrations/droid/hooks.template.json"
+  sed "s|/ABS/PATH|${abs_path}|g; s|bun /|${bun_bin} /|g; /_instructions/d" "${abs_path}/integrations/droid/hooks.template.json"
 
 # Install the Factory Droid bridge hooks to ~/.factory/hooks.json.
 droid-install:
@@ -331,7 +331,7 @@ droid-install:
     echo "  (Preview with: just droid-hooks-print)"
     exit 1
   fi
-  sed "s|/ABS/PATH|${abs_path}|g; s|^bun |${bun_bin} |g; /_instructions/d" "${abs_path}/integrations/droid/hooks.template.json" > "$dest"
+  sed "s|/ABS/PATH|${abs_path}|g; s|bun /|${bun_bin} /|g; /_instructions/d" "${abs_path}/integrations/droid/hooks.template.json" > "$dest"
   echo "✓ Installed droid hooks → $dest"
   echo "  hook source: ${abs_path}"
   echo "  Now run droid with OBS_AUTH_TOKEN / OBS_SERVER_URL exported (or in .env)."
