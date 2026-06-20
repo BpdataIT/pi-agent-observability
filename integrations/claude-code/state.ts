@@ -35,12 +35,15 @@ export interface SessionState {
   openToolIds: Record<string, number>;
   /** True once we've logged the first-run debug payload for this session. */
   firstRunLogged: boolean;
+  /** Cursor-under-Pi delegation — skip subsequent Cursor hooks for this session. */
+  piDelegated?: boolean;
 }
 
 const DEFAULT_STATE: SessionState = {
   transcriptOffset: 0,
   openToolIds: {},
   firstRunLogged: false,
+  piDelegated: false,
 };
 
 // ---------------------------------------------------------------------------
@@ -95,6 +98,7 @@ export function loadState(stateDir: string): SessionState {
       transcriptOffset: typeof parsed.transcriptOffset === "number" ? parsed.transcriptOffset : 0,
       openToolIds: parsed.openToolIds && typeof parsed.openToolIds === "object" ? parsed.openToolIds : {},
       firstRunLogged: parsed.firstRunLogged === true,
+      piDelegated: parsed.piDelegated === true,
     };
   } catch {
     return { ...DEFAULT_STATE };
@@ -107,6 +111,17 @@ export function saveState(stateDir: string, state: SessionState): void {
   } catch {
     // Non-fatal: the seq counter is more critical than state.json
   }
+}
+
+export function isPiDelegated(stateDir: string): boolean {
+  return loadState(stateDir).piDelegated === true;
+}
+
+export function markPiDelegated(stateDir: string): void {
+  const state = loadState(stateDir);
+  if (state.piDelegated) return;
+  state.piDelegated = true;
+  saveState(stateDir, state);
 }
 
 // ---------------------------------------------------------------------------

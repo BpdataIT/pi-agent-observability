@@ -1,0 +1,6 @@
+{
+  "hook_event_name": "sessionStart",
+  "session_id": "agent-test-cursor-001",
+  "cwd": "/Users/tester/project",
+  "cursor_version": "1.2.3"
+}

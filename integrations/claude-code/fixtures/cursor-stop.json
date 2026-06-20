@@ -1,0 +1,7 @@
+{
+  "hook_event_name": "stop",
+  "session_id": "agent-test-cursor-pi-001",
+  "cwd": "/Users/tester/project",
+  "cursor_version": "1.2.3",
+  "status": "completed"
+}

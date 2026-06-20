@@ -127,6 +127,25 @@ sessions in the same pool.
 
 ---
 
+## Cursor hooks and Pi delegation
+
+Global Claude Code hooks (`~/.claude/settings.json`) also fire when **Cursor IDE**
+runs agents through its SDK — including when **pi** delegates work to Cursor
+(`provider=cursor`). Those hooks use camelCase event names (`sessionStart`,
+`beforeSubmitPrompt`, `stop`, `sessionEnd`) and include a `cursor_version` field.
+
+The pi extension (`extension/pi-observability.ts`) already emits the full event
+stream for pi+cursor sessions. To avoid duplicate swimlane lanes, the bridge
+**skips** Cursor hooks when the prompt contains pi harness markers
+(`"System instructions from pi"`, `"operating inside pi"`) or when a prior hook
+for the same `session_id` was already classified as pi-delegated.
+
+Skipped hooks are logged to `${TMPDIR}/pi-obs-cc/<session_id>/debug.log` under
+`skip_cursor_pi_delegated`. Standalone Cursor sessions (no pi harness) still
+emit `custom` events and appear in the dashboard.
+
+---
+
 ## Hook → ObsEvent mapping
 
 | Claude Code hook | ObsEvent(s) emitted | Notes |

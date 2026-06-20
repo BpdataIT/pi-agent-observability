@@ -33,7 +33,13 @@ import {
   loadState,
   saveState,
   wipeSession,
+  isPiDelegated,
 } from "./state.ts";
+import {
+  isCursorHookPayload,
+  isPiDelegatedCursorPayload,
+  shouldSkipCursorHook,
+} from "./cursor-detect.ts";
 import type { UsageSummary } from "../../shared/types.ts";
 import {
   MAX_TEXT_FIELD,
@@ -604,6 +610,76 @@ describe("state load/save", () => {
 // ---------------------------------------------------------------------------
 // 12. Concurrent seq allocation (simulated — same process loops)
 // ---------------------------------------------------------------------------
+
+function loadFixture(name: string): Record<string, unknown> {
+  const raw = fs.readFileSync(path.join(FIXTURES_DIR, name), "utf8");
+  return JSON.parse(raw);
+}
+
+// ---------------------------------------------------------------------------
+// 13. Cursor hook detection + pi-delegated skip
+// ---------------------------------------------------------------------------
+
+describe("cursor hook detection", () => {
+  test("isCursorHookPayload detects cursor_version", () => {
+    const payload = loadFixture("cursor-session-start.json");
+    expect(isCursorHookPayload(payload)).toBe(true);
+  });
+
+  test("isCursorHookPayload false for CC SessionStart", () => {
+    const payload = loadFixture("session-start.json");
+    expect(isCursorHookPayload(payload)).toBe(false);
+  });
+
+  test("isPiDelegatedCursorPayload true with pi harness", () => {
+    const payload = loadFixture("cursor-before-submit-prompt-pi.json");
+    expect(isPiDelegatedCursorPayload(payload)).toBe(true);
+  });
+
+  test("isPiDelegatedCursorPayload false for standalone cursor prompt", () => {
+    const payload = loadFixture("cursor-before-submit-prompt-standalone.json");
+    expect(isPiDelegatedCursorPayload(payload)).toBe(false);
+  });
+});
+
+describe("pi-delegated cursor hook skip", () => {
+  test("shouldSkipCursorHook true for pi-delegated beforeSubmitPrompt", () => {
+    const sessionId = makeTmpSessionId();
+    const stateDir = getStateDir(sessionId);
+    try {
+      const payload = loadFixture("cursor-before-submit-prompt-pi.json");
+      expect(shouldSkipCursorHook(payload, stateDir)).toBe(true);
+      expect(isPiDelegated(stateDir)).toBe(true);
+    } finally {
+      try { fs.rmSync(stateDir, { recursive: true }); } catch {}
+    }
+  });
+
+  test("shouldSkipCursorHook false for standalone cursor sessionStart", () => {
+    const sessionId = makeTmpSessionId();
+    const stateDir = getStateDir(sessionId);
+    try {
+      const payload = loadFixture("cursor-session-start.json");
+      expect(shouldSkipCursorHook(payload, stateDir)).toBe(false);
+    } finally {
+      try { fs.rmSync(stateDir, { recursive: true }); } catch {}
+    }
+  });
+
+  test("piDelegated persists across hooks without prompt text", () => {
+    const sessionId = makeTmpSessionId();
+    const stateDir = getStateDir(sessionId);
+    try {
+      const promptPayload = loadFixture("cursor-before-submit-prompt-pi.json");
+      expect(shouldSkipCursorHook(promptPayload, stateDir)).toBe(true);
+
+      const stopPayload = loadFixture("cursor-stop.json");
+      expect(shouldSkipCursorHook(stopPayload, stateDir)).toBe(true);
+    } finally {
+      try { fs.rmSync(stateDir, { recursive: true }); } catch {}
+    }
+  });
+});
 
 describe("seq uniqueness under load", () => {
   test("100 sequential nextSeq calls produce 100 unique values", () => {

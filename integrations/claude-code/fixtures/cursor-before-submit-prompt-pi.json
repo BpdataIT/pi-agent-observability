@@ -1,0 +1,7 @@
+{
+  "hook_event_name": "beforeSubmitPrompt",
+  "session_id": "agent-test-cursor-pi-001",
+  "cwd": "/Users/tester/project",
+  "cursor_version": "1.2.3",
+  "prompt": "Callable tool surfaces this run.\n\nSystem instructions from pi:\nYou are an expert coding assistant operating inside pi.\n\nUser: hello"
+}
