@@ -1,0 +1,7 @@
+{
+  "hook_event_name": "beforeSubmitPrompt",
+  "session_id": "agent-test-cursor-standalone-001",
+  "cwd": "/Users/tester/project",
+  "cursor_version": "1.2.3",
+  "prompt": "Refactor the auth module to use JWT instead of sessions."
+}

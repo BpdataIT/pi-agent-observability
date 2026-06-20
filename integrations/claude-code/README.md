@@ -127,6 +127,76 @@ sessions in the same pool.
 
 ---
 
+## Cursor hooks and Pi delegation
+
+Global Claude Code hooks (`~/.claude/settings.json`) also fire when **Cursor IDE**
+runs agents through its SDK — including when **pi** delegates work to Cursor
+(`provider=cursor`). Those hooks use camelCase event names (`sessionStart`,
+`beforeSubmitPrompt`, `stop`, `sessionEnd`) and include a `cursor_version` field.
+
+The pi extension (`extension/pi-observability.ts`) already emits the full event
+stream for pi+cursor sessions. To avoid duplicate swimlane lanes, the bridge
+applies **three skip rules** in `cursor-detect.ts` (all global — no per-project
+hook scoping required):
+
+| Rule | When | Why |
+|------|------|-----|
+| **1. Always skip Cursor `sessionStart`** | `cursor_version` present + `hook_event_name === "sessionStart"` | Fires before pi harness text is available; a lone `sessionStart` was the event that spawned empty phantom swimlane columns via auto-add |
+| **2. Skip pi-delegated prompts** | `beforeSubmitPrompt` contains `"System instructions from pi"` or `"operating inside pi"` | Confirms Cursor is running inside pi; sets `piDelegated` in session state |
+| **3. Skip subsequent hooks** | `piDelegated: true` in `${TMPDIR}/pi-obs-cc/<session_id>/state.json` | Covers `preToolUse`, `postToolUse`, `stop`, `sessionEnd`, etc. when prompt text is absent |
+
+Skipped hooks are logged to `${TMPDIR}/pi-obs-cc/<session_id>/debug.log` under
+`skip_cursor_pi_delegated`.
+
+Implementation: `integrations/claude-code/cursor-detect.ts`,
+`integrations/claude-code/state.ts` (`piDelegated` field).
+
+### Tradeoffs (global hooks, bridge-level dedup)
+
+These are intentional compromises so you can keep **one global**
+`~/.claude/settings.json` install without polluting native pi sessions.
+
+#### What you gain
+
+- **Pi + Cursor (`provider=cursor`)**: one swimlane, one session UUID, full event
+  stream from `extension/pi-observability.ts` — no phantom `agent-*` lanes.
+- **Claude Code CLI**: unchanged. PascalCase hooks (`SessionStart`, `UserPromptSubmit`,
+  …) still map to full `ObsEvent` envelopes with tokens and cost.
+- **Global install**: no need to duplicate hooks per project or maintain separate
+  `~/.claude` vs project-level configs.
+
+#### What you give up or change
+
+| Area | Tradeoff | Detail |
+|------|----------|--------|
+| **Standalone Cursor `sessionStart`** | Not emitted | Cursor IDE sessions (not running through pi) no longer produce a `custom` / `sessionStart` event. The lane appears on the first `beforeSubmitPrompt` instead. Session metadata that only existed on `sessionStart` (e.g. `workspace_roots`, `cursor_version`) is absent unless a later hook carries it. |
+| **Standalone Cursor lifecycle** | Partial stream only | Hooks the bridge does not map (most camelCase Cursor events) still become `custom` events if not pi-delegated. There is no full Cursor→ObsEvent mapping like Claude Code CLI — by design, to avoid duplicating pi extension semantics. |
+| **Pi harness coupling** | String markers | Pi-delegation detection depends on pi injecting `"System instructions from pi"` and `"operating inside pi"` into the Cursor prompt. If pi renames or removes these phrases, delegation skip may fail until markers are updated in `cursor-detect.ts`. |
+| **False-positive risk (low)** | Standalone Cursor prompt mentions pi | A standalone Cursor user prompt that literally contains both marker phrases would be suppressed. Markers are multi-word harness phrases, not bare `"pi"`, to keep this rare. |
+| **False-negative risk (low)** | Harness not in first prompt | If pi ever stops prepending harness text before the first `beforeSubmitPrompt`, rule 2 would not fire; rule 1 still prevents the phantom `sessionStart` lane. Remaining hooks might leak until markers appear or `piDelegated` is set. |
+| **Skipped-hook visibility** | Debug log only | Suppressed Cursor hooks are not POSTed to the dashboard. Inspect `${TMPDIR}/pi-obs-cc/<session_id>/debug.log` for `skip_cursor_pi_delegated` entries. Pi extension events remain the source of truth for pi+cursor runs. |
+| **Historical phantom sessions** | Still in DB | Sessions created before this fix remain in SQLite and may still appear if lanes were restored from URL state. New pi+cursor runs should not add new phantoms. |
+| **No server/schema changes** | Bridge-only fix | Deliberately avoids `/events` API or dashboard changes. Optional future hardening: swimlane auto-add guard, or `GET /sessions` cwd correlation at hook time (adds latency per hook). |
+
+#### Alternatives considered (not chosen)
+
+| Approach | Why not |
+|----------|---------|
+| **Per-project hook scoping** | Works but conflicts with global install requirement. |
+| **Map Cursor hooks → full ObsEvents in CC bridge** | Would duplicate pi extension events and create parallel semantic streams. |
+| **Disable global hooks when using pi** | Manual, error-prone; defeats unified observability goal. |
+| **Blanket suppress all `cursor_version` hooks** | Would hide legitimate standalone Cursor IDE sessions entirely. |
+
+#### Recommended mental model
+
+- **Claude Code CLI** → CC bridge is the telemetry source (mapped events, cost, tokens).
+- **Pi (any provider)** → pi extension is the telemetry source.
+- **Pi + Cursor** → pi extension only; CC bridge is a no-op for Cursor hooks.
+- **Standalone Cursor IDE** → CC bridge emits sparse `custom` events from
+  `beforeSubmitPrompt` onward; not a full agent lifecycle mirror.
+
+---
+
 ## Hook → ObsEvent mapping
 
 | Claude Code hook | ObsEvent(s) emitted | Notes |
@@ -200,7 +270,7 @@ State is stored under `${TMPDIR}/pi-obs-cc/<session_id>/`:
 | File | Purpose |
 |---|---|
 | `seq` | Append-byte atomic counter; fileSize = next seq value |
-| `state.json` | `transcriptOffset`, `openToolIds`, `firstRunLogged` |
+| `state.json` | `transcriptOffset`, `openToolIds`, `firstRunLogged`, `piDelegated` |
 | `debug.log` | Error and diagnostic log (first hook payload, unknown models, etc.) |
 | `spool/*.json` | Events spooled when the server was unreachable (auto-pruned) |
 
@@ -255,6 +325,9 @@ Expected: the session appears with `agent_name=claude-code`, non-zero
   table at `integrations/claude-code/model-prices.ts` when prices change.
 - **No retroactive backfill**: if the bridge was disabled during a run, those
   events are lost (same as the Pi extension).
+- **Cursor + pi dedup**: see [Cursor hooks and Pi delegation](#cursor-hooks-and-pi-delegation)
+  for tradeoffs when global hooks are installed (skipped `sessionStart`, harness
+  markers, standalone Cursor partial stream).
 
 ---
 
@@ -264,6 +337,7 @@ Expected: the session appears with `agent_name=claude-code`, non-zero
 bun test integrations/claude-code/obs-hook.test.ts
 ```
 
-All 35 tests cover: transcript deduplication (the key requirement), usage
+All 42 tests cover: transcript deduplication (the key requirement), usage
 mapping, cost computation, seq counter atomicity, state round-trips, tool_call_id
-determinism, truncation limits, and envelope shape validation.
+determinism, truncation limits, envelope shape validation, and Cursor/pi
+delegation skip behavior.

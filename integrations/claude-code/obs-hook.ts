@@ -55,6 +55,7 @@ import {
 } from "./state.ts";
 
 import { parseNewTurns, buildAssistantMessagePayload, buildThinkingPayload } from "./transcript.ts";
+import { shouldSkipCursorHook } from "./cursor-detect.ts";
 
 // ---------------------------------------------------------------------------
 // .env loader (mirrors extension/pi-observability.ts:37)
@@ -699,9 +700,18 @@ async function main(): Promise<void> {
     stateDir = getStateDir(sessionId);
   }
 
-  // Reset seq counter on SessionStart (mirrors Pi's seqCounter = 0)
+  // Reset seq counter on Claude Code SessionStart only (not Cursor sessionStart).
   if (hookEventName === "SessionStart") {
     resetSession(stateDir);
+  }
+
+  if (shouldSkipCursorHook(hookPayload, stateDir)) {
+    debugLog(stateDir, "skip_cursor_pi_delegated", {
+      hookEventName,
+      sessionId,
+      cursor_version: hookPayload.cursor_version,
+    });
+    process.exit(0);
   }
 
   // Log the first real hook payload to the debug file (Story 1.2 — "log one
