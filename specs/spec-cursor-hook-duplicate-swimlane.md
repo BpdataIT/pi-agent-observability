@@ -117,4 +117,31 @@ Manual: run `pi` with Cursor provider, send one message, open swimlane with auto
 |------|------------|
 | Pi harness marker strings change | Centralize markers; use persisted `piDelegated` after first detection |
 | False positive on standalone Cursor | Specific multi-word phrases, not bare `"pi"` |
-| Early hooks before prompt | Persist `piDelegated` on first positive `beforeSubmitPrompt` |
+| Early hooks before prompt | Always skip Cursor `sessionStart`; persist `piDelegated` on first positive `beforeSubmitPrompt` |
+
+## Tradeoffs (global hooks, bridge-level dedup)
+
+Documented in full in `integrations/claude-code/README.md` § *Cursor hooks and Pi delegation*.
+
+### Summary
+
+| Stakeholder | Outcome |
+|-------------|---------|
+| **Pi + Cursor** | One lane, full stream from pi extension; CC bridge silent |
+| **Claude Code CLI** | Unchanged full mapping |
+| **Standalone Cursor IDE** | No `sessionStart` event; lane from `beforeSubmitPrompt`; sparse `custom` stream only |
+
+### Give-ups (intentional)
+
+1. **Cursor `sessionStart` never POSTed** — prevents phantom swimlane auto-add; standalone Cursor loses session-start metadata in the dashboard.
+2. **Pi harness string coupling** — `"System instructions from pi"` / `"operating inside pi"` required for delegation detection after `sessionStart`.
+3. **No full Cursor→ObsEvent mapping** — would duplicate pi extension; standalone Cursor stays `custom`-only for unmapped hooks.
+4. **Skipped hooks invisible in UI** — only in `debug.log`; pi extension is source of truth for pi+cursor.
+5. **Historical phantoms** — pre-fix `agent-*` sessions may linger in DB / URL-restored lanes.
+
+### Alternatives not chosen
+
+- Per-project hook scoping (user requires global install)
+- Map all Cursor hooks to ObsEvents (duplicate semantics)
+- Blanket suppress all `cursor_version` hooks (hides standalone Cursor)
+- Server/dashboard changes (scope kept to bridge)

@@ -62,6 +62,13 @@ export function shouldSkipCursorHook(
   stateDir: string,
 ): boolean {
   if (!isCursorHookPayload(hookPayload)) return false;
+
+  // Cursor sessionStart fires before pi harness text is available and is the
+  // sole event that spawns phantom swimlane columns (auto-add on first SSE).
+  // Pi extension already emits session_start; standalone Cursor sessions still
+  // appear from beforeSubmitPrompt onward.
+  if (hookPayload.hook_event_name === "sessionStart") return true;
+
   if (isPiDelegatedCursorPayload(hookPayload) || isPiDelegated(stateDir)) {
     markPiDelegated(stateDir);
     return true;

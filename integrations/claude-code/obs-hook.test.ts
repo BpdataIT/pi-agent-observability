@@ -655,12 +655,12 @@ describe("pi-delegated cursor hook skip", () => {
     }
   });
 
-  test("shouldSkipCursorHook false for standalone cursor sessionStart", () => {
+  test("shouldSkipCursorHook true for cursor sessionStart (never POST)", () => {
     const sessionId = makeTmpSessionId();
     const stateDir = getStateDir(sessionId);
     try {
       const payload = loadFixture("cursor-session-start.json");
-      expect(shouldSkipCursorHook(payload, stateDir)).toBe(false);
+      expect(shouldSkipCursorHook(payload, stateDir)).toBe(true);
     } finally {
       try { fs.rmSync(stateDir, { recursive: true }); } catch {}
     }
