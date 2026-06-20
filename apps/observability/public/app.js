@@ -179,37 +179,50 @@ function apiUrl(path, params = {}) {
   return u.toString();
 }
 
-// ─── Model context windows (approximate) ────────────────────────────
-const MODEL_CONTEXT_WINDOWS = [
-  // 1M-context Claude variants. Opus 4.8 ships with a 1M window by default;
-  // some models also carry an explicit "[1m]" tag. These must precede the
-  // generic claude rules below since getContextWindow returns on first match.
-  [/\[1m\]/i, 1_000_000],
-  [/^claude-opus-4-8/i, 1_000_000],
-  [/^claude-(haiku|sonnet|opus|3|4|5)/i, 200_000],
-  [/^claude-/i, 200_000],
-  [/^gpt-5/i, 400_000],
-  [/^gpt-4o/i, 128_000],
-  [/^gpt-4/i, 128_000],
-  [/^o[13]/i, 200_000],
-  [/^gemini-1\.5-pro/i, 2_000_000],
-  [/^gemini-(2|3)/i, 1_000_000],
-  [/^gemini-1\.5/i, 1_000_000],
-  [/^gemini-/i, 1_000_000],
-  [/^z-ai\/glm-4\.6/i, 200_000],
-  [/^glm-/i, 128_000],
-  // DeepSeek: pi treats these as 64k in its own context bar (verified against
-  // a live deepseek-v4-flash session showing 9% with input=5683 → 5683/64000
-  // ≈ 8.9%). Even though DeepSeek's API can physically accept 128k+, pi caps
-  // the user-facing window at 64k as a conservative budget. We mirror pi's
-  // value to keep our context % aligned with what the user sees in terminal.
-  [/^deepseek/i, 64_000],
-];
+// ─── Model context windows (legacy-session fallback) ─────────────────────
+// The authoritative source is shared/model-metadata.ts (single source of
+// truth for the whole stack). New sessions carry a stamped `context_window`
+// (from pi's ctx.getContextUsage() or the agy/cc bridges), surfaced via
+// stats.context_window — that path never hits the network. ONLY legacy
+// sessions (events recorded before context_window capture) fall through to
+// the server endpoint below, which reads the same shared table so a legacy
+// glm-5.2 session now renders a 1M bar instead of the old /^glm-/i → 128k
+// regex fallback.
 const DEFAULT_CONTEXT_WINDOW = 128_000;
-function getContextWindow(model) {
-  if (!model) return DEFAULT_CONTEXT_WINDOW;
-  for (const [re, n] of MODEL_CONTEXT_WINDOWS) if (re.test(model)) return n;
-  return DEFAULT_CONTEXT_WINDOW;
+
+// Model-keyed cache shared by the single-session view (computeAgentInfo) and
+// the swimlane view (updateLaneRow2), so multiple sessions of the same model
+// share one fetch. { value, resolved, cbs: [onResolve...] }
+const _ctxWindowByModel = new Map();
+
+/** Resolve the context window for a model via the server endpoint (backed by
+ *  shared/model-metadata.ts). Returns the currently-known window
+ *  (DEFAULT_CONTEXT_WINDOW while pending) and registers `onResolve(value)` to
+ *  fire once with the resolved number — callers re-render their view there.
+ *  Failures resolve to DEFAULT_CONTEXT_WINDOW, so a dead server never blanks a
+ *  context bar. */
+function resolveContextWindow(model, onResolve) {
+  const key = model || "";
+  const cached = _ctxWindowByModel.get(key);
+  if (cached) {
+    if (cached.resolved) { if (onResolve) onResolve(cached.value); }
+    else if (onResolve) cached.cbs.push(onResolve);
+    return cached.value;
+  }
+  const entry = { value: DEFAULT_CONTEXT_WINDOW, resolved: false, cbs: onResolve ? [onResolve] : [] };
+  _ctxWindowByModel.set(key, entry);
+  fetch(apiUrl("/models/context-window", { model }), { headers: authHeaders() })
+    .then((r) => (r.ok ? r.json() : null))
+    .then((j) => {
+      entry.value = (j && typeof j.context_window === "number") ? j.context_window : DEFAULT_CONTEXT_WINDOW;
+    })
+    .catch(() => { entry.value = DEFAULT_CONTEXT_WINDOW; })
+    .finally(() => {
+      entry.resolved = true;
+      const cbs = entry.cbs; entry.cbs = [];
+      for (const cb of cbs) { try { cb(entry.value); } catch (_) { /* re-render best-effort */ } }
+    });
+  return entry.value; // pending state — sane default meanwhile
 }
 
 // ─── Agent info computation ─────────────────────────────────────
@@ -271,10 +284,14 @@ function computeAgentInfo(sid) {
   // Context window denominator: prefer the value captured from pi's
   // ctx.getContextUsage() at message_end (same source as /context), stored
   // on the assistant_message event and surfaced via stats.context_window.
-  // Fall back to the MODEL_CONTEXT_WINDOWS regex table only for legacy
-  // events recorded before the extension captured context_window.
+  // Only for LEGACY events recorded before context_window capture do we fall
+  // back to the server endpoint (shared/model-metadata.ts) — queried once per
+  // model and cached. DEFAULT_CONTEXT_WINDOW is used while the fetch is pending
+  // or on failure, so a dead server never blanks the bar.
   const storedContextWindow = stats.context_window ?? null;
-  const contextTotal = storedContextWindow != null ? storedContextWindow : getContextWindow(s.model);
+  const contextTotal = storedContextWindow != null
+    ? storedContextWindow
+    : resolveContextWindow(s.model, () => { if (STATE.selectedSessionId === sid) renderAgentSubnav(); });
   const contextUsed = latestInput || 0;
   const contextRemaining = Math.max(0, contextTotal - contextUsed);
   const contextRemainingPct = contextTotal ? Math.round((contextRemaining / contextTotal) * 100) : 0;
@@ -1142,7 +1159,7 @@ Object.assign(window.OBS, {
   getState: () => STATE, summaryFor, summaryClass, renderDetailHTML,
   fmtTs, trunc, shortId, fetchSessionEvents, renderSessions, apiUrl, authHeaders,
   fmtRel, fmtTokens, escapeHtml, toolNamePillHTML, saveURLState, updateBreadcrumb,
-  getContextWindow, computeAgentInfo, fmtDuration,
+  DEFAULT_CONTEXT_WINDOW, resolveContextWindow, computeAgentInfo, fmtDuration,
 });
 
 // ─── Boot ───────────────────────────────────────────────────────────────────

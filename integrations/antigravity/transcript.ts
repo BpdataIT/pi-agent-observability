@@ -306,11 +306,11 @@ export function buildAssistantMessagePayload(
     tool_call_ids: toolCallIds,
     stop_reason: turn.toolCalls.length > 0 ? "toolUse" : "stop",
     usage: usage ?? zeroUsage(),
-    // Stamp the model's context window (resolved from the agy display label)
-    // so the shared UI's context bar denominator is correct without relying
-    // on its MODEL_CONTEXT_WINDOWS regex table, which doesn't match agy's
-    // human labels like "Gemini 3.5 Flash (High)". Undefined for unknown
-    // labels → UI falls back to its own table / default.
+    // Stamp the model's context window (resolved from the agy display label
+    // via shared/model-metadata.ts) so the shared UI's context bar denominator
+    // is correct without relying on the UI's legacy endpoint fallback, which
+    // would not match agy's human labels like "Gemini 3.5 Flash (High)".
+    // Undefined for unknown labels → UI falls back to its own default.
     context_window: contextWindowForLabel(modelLabel),
   };
   if (timing?.latency_ms !== undefined && timing.latency_ms > 0) {

@@ -234,17 +234,32 @@ bun integrations/antigravity/usage-decoder.ts <db-or-uuid> --match-content  # pa
 bun integrations/antigravity/usage-decoder.ts <db-or-uuid> --json        # machine-readable
 ```
 
-## Cost (Gemini price table)
+## Cost & context window (shared model-metadata table)
 
-[`model-prices.ts`](./model-prices.ts) mirrors
-`integrations/claude-code/model-prices.ts` (same `ModelPrice` /
-`getModelPrice` / `computeCost` shape), keyed by the **normalized model label**
-(the same string `contextWindowForLabel` keys on). Prices per-million tokens
-are sourced from the Google AI for Developers pricing page (consulted
-2026-06-20) and are trivially correctable constants. Unknown labels yield
-`cost_total: 0` + a debug log (never throw). **Note:** thinking tokens (`f9`)
-are decoded but intentionally not billed, so cost is a conservative lower bound
-for Gemini High-effort turns — see [`usage-decoder.md`](./usage-decoder.md).
+Window and cost both resolve from the **single source of truth** at
+[`shared/model-metadata.ts`](../../shared/model-metadata.ts) (see
+[`shared/model-metadata.md`](../../shared/model-metadata.md)). The local
+[`model-context.ts`](./model-context.ts) (`contextWindowForLabel`) and
+[`model-prices.ts`](./model-prices.ts) (`getModelPrice` / `computeCost`) are
+**thin wrappers** preserved for signature compatibility — their bodies delegate
+to the shared module, so `transcript.ts` / `obs-hook.ts` / the `scripts/agy-*`
+helper scripts import them unchanged. Edit the **shared** table when a provider
+ships a new window or price; `just model-metadata-validate` checks it against
+the models.dev registry.
+
+agy exposes the model as a human display label (e.g. `Gemini 3.5 Flash (High)`),
+which the shared normalizer collapses to the same canonical key the
+canonical-id integrations produce. Prices per-million tokens are sourced from
+the Google AI for Developers + Anthropic pricing pages (consulted 2026-06-20).
+Unknown labels yield `cost_total: 0` + a debug log (never throw). **Note:**
+thinking tokens (`f9`) are decoded but intentionally not billed, so cost is a
+conservative lower bound for Gemini High-effort turns — see
+[`usage-decoder.md`](./usage-decoder.md).
+
+> The **pi extension** is intentionally NOT a consumer of the shared context
+> table — it reads the real window from `ctx.getContextUsage()` at runtime
+> (strictly more accurate). The shared table is the fallback for the
+> out-of-process integrations + the UI legacy path.
 
 ---
 

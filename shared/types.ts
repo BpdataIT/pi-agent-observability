@@ -191,7 +191,7 @@ export interface AssistantMessagePayload {
    * sourced from pi's ctx.getContextUsage().contextWindow at message_end —
    * the same value pi's /context command reports. Present on events emitted
    * by extension versions that capture it; absent on legacy events (UI falls
-   * back to its MODEL_CONTEXT_WINDOWS regex table).
+   * back to the /models/context-window endpoint, backed by shared/model-metadata.ts).
    */
   context_window?: number;
 }

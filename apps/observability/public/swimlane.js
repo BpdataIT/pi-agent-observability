@@ -6,7 +6,7 @@
 
 const STATE = window.__OBS_STATE;
 const O = window.OBS;
-const { summaryFor, summaryClass, renderDetailHTML, fmtTs, trunc, shortId, fetchSessionEvents, renderSessions, apiUrl, authHeaders, fmtRel, fmtTokens, saveURLState, getContextWindow, toolNamePillHTML } = O;
+const { summaryFor, summaryClass, renderDetailHTML, fmtTs, trunc, shortId, fetchSessionEvents, renderSessions, apiUrl, authHeaders, fmtRel, fmtTokens, saveURLState, resolveContextWindow, toolNamePillHTML } = O;
 
 const LANES = new Map();
 let autoAddLanes = true;
@@ -357,7 +357,13 @@ function updateLaneRow2(sid) {
     }
   }
   const model = lane.session?.model || "";
-  const ctxTotal = (typeof getContextWindow === "function") ? getContextWindow(model) : 128000;
+  // Legacy-session fallback: resolve the window once per model via the server
+  // endpoint (shared/model-metadata.ts), cached in app.js. Re-render this lane
+  // when it resolves so the bar reflects the real denominator (e.g. 1M for
+  // glm-5.2, not the old /^glm-/i → 128k regex default).
+  const ctxTotal = (typeof resolveContextWindow === "function")
+    ? resolveContextWindow(model, () => updateLaneRow2(sid))
+    : 128000;
   const ctxUsed = latestInput || 0;
   const ctxPctUsed = ctxTotal ? Math.round((ctxUsed / ctxTotal) * 100) : 0;
   const ctxPctRemaining = 100 - ctxPctUsed;

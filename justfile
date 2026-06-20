@@ -281,6 +281,20 @@ agy-uninstall:
 agy-usage-validate:
   bun scripts/agy-usage-validate.ts
 
+# Lossy-normalizer self-test for shared/model-metadata.ts (Stories 2.2 + 3.3).
+# Pins the known-lossy label↔id pairs (e.g. "Gemini 3.5 Flash (High)" vs
+# gemini-3-flash-a both → 1M) and the pre-migration cost snapshots. GATE for
+# Phases 2/3 (a normalization bug flipping 1M → 128k fails this).
+model-metadata-selftest:
+  bun scripts/model-metadata-selftest.ts
+
+# Drift gate for shared/model-metadata.ts. Cross-checks the shared table against
+# the models.dev registry (offline → WARNING + skip, exit 0) and against the
+# distinct model set in db/obs.db, and runs the lossy-pair self-test inline.
+# Exit non-zero only on a self-test failure. See shared/model-metadata.md.
+model-metadata-validate:
+  bun scripts/model-metadata-validate.ts
+
 # ═══════════════════════════════════════════════════════════════════════════
 #  EXTRA  —  build, validate, backup
 # ═══════════════════════════════════════════════════════════════════════════

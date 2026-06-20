@@ -221,7 +221,7 @@ export function prepare(db: Database): PreparedQueries {
       -- Sourced from the most recent assistant_message that carries it, so
       -- mid-session model switches are reflected. NULL for legacy events
       -- recorded before context_window capture — the UI falls back to its
-      -- MODEL_CONTEXT_WINDOWS regex table in that case.
+      -- /models/context-window endpoint (shared/model-metadata.ts) in that case.
       (
         SELECT json_extract(e2.payload_json, '$.context_window')
         FROM events e2

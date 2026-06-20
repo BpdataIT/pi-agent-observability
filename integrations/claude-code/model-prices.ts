@@ -1,212 +1,63 @@
 /**
  * Model → price table for Claude Code cost computation.
  *
- * Prices are per-million tokens (input / output / cache-read / cache-write).
+ * THIN WRAPPER — delegates to the single source of truth at
+ * `shared/model-metadata.ts` (see `shared/model-metadata.md`). This file
+ * exists only to preserve the `getModelPrice` / `computeCost` / `ModelPrice` /
+ * `UsageForCost` signatures used by `transcript.ts` and `obs-hook.test.ts`; the
+ * price table + normalizer live in the shared module.
  *
- * Source: https://www.anthropic.com/pricing (consulted 2026-06-02).
- * NOTE: These are placeholder constants in one place so they are trivially
- * correctable when Anthropic updates pricing. All values are clearly labeled
- * and keyed by the exact model id that appears in the transcript's
- * `.message.model` field.
+ * Prices are per-million tokens (USD). The transcript carries no `cost` field
+ * — only token counts and a model id — so the bridge computes cost_total here:
  *
- * claude-opus-4-8  : verified from current Anthropic API pricing page
- * claude-sonnet-4-6: verified from current Anthropic API pricing page
- * claude-haiku-4-5 : verified from current Anthropic API pricing page
+ *   cost_total = (input*in + output*out + cache_read*cr + cache_write*cw) / 1e6
  *
- * If a model id is not found in this table, cost_total is set to 0 and a
- * debug note is emitted — this never causes a crash.
+ * The shared table covers Claude + GLM (Z.AI / Zhipu) + Gemini + the new
+ * Qwen/Kimi families. If a model id is not found, `getModelPrice` returns
+ * `UNKNOWN_PRICE` (`unknown: true`) and `computeCost` returns
+ * `{ cost_total: 0, unknown_model: true }` (never throws) — the
+ * `unknown_model_cost_zero` pattern.
+ *
+ * Source: https://www.anthropic.com/pricing + models.dev registry, consulted
+ * 2026-06-20 (see the shared table for per-model citations). NOTE: some legacy
+ * Claude/GLM entries intentionally keep their pre-migration values for the
+ * Phase 2/3 no-op (e.g. claude-opus-4-8 stays 15/75 though the registry lists
+ * 5/25); `just model-metadata-validate` reports that drift.
  */
 
-export interface ModelPrice {
-  /** Input tokens per million USD */
-  input_per_million: number;
-  /** Output tokens per million USD */
-  output_per_million: number;
-  /** Cache-read tokens per million USD */
-  cache_read_per_million: number;
-  /** Cache-write (cache-creation) tokens per million USD */
-  cache_write_per_million: number;
-}
+import {
+  getModelPrice as sharedGetModelPrice,
+  computeCost as sharedComputeCost,
+  type ModelPrice as SharedModelPrice,
+  type UsageForCost as SharedUsageForCost,
+} from "../../shared/model-metadata.ts";
 
-// ---------------------------------------------------------------------------
-// Price table — update these constants when Anthropic changes pricing
-// ---------------------------------------------------------------------------
+/** Per-million-token USD price for one model. Same shape as the shared module's. */
+export type ModelPrice = SharedModelPrice;
 
-/** Fallback when a model id is unknown. Results in cost_total: 0. */
-const UNKNOWN_PRICE: ModelPrice = {
-  input_per_million: 0,
-  output_per_million: 0,
-  cache_read_per_million: 0,
-  cache_write_per_million: 0,
-};
-
-const PRICE_TABLE: Record<string, ModelPrice> = {
-  // ── Claude Opus 4.8 ─────────────────────────────────────────────────────
-  // https://www.anthropic.com/pricing#anthropic-api
-  "claude-opus-4-8": {
-    input_per_million: 15.0,
-    output_per_million: 75.0,
-    cache_read_per_million: 1.50,
-    cache_write_per_million: 18.75,
-  },
-  // Alias (sometimes returned without the patch segment)
-  "claude-opus-4": {
-    input_per_million: 15.0,
-    output_per_million: 75.0,
-    cache_read_per_million: 1.50,
-    cache_write_per_million: 18.75,
-  },
-
-  // ── Claude Sonnet 4.6 ───────────────────────────────────────────────────
-  "claude-sonnet-4-6": {
-    input_per_million: 3.0,
-    output_per_million: 15.0,
-    cache_read_per_million: 0.30,
-    cache_write_per_million: 3.75,
-  },
-  "claude-sonnet-4": {
-    input_per_million: 3.0,
-    output_per_million: 15.0,
-    cache_read_per_million: 0.30,
-    cache_write_per_million: 3.75,
-  },
-  // Older claude-3-5-sonnet alias
-  "claude-3-5-sonnet-20241022": {
-    input_per_million: 3.0,
-    output_per_million: 15.0,
-    cache_read_per_million: 0.30,
-    cache_write_per_million: 3.75,
-  },
-
-  // ── Claude Haiku 4.5 ────────────────────────────────────────────────────
-  "claude-haiku-4-5": {
-    input_per_million: 0.80,
-    output_per_million: 4.0,
-    cache_read_per_million: 0.08,
-    cache_write_per_million: 1.0,
-  },
-  "claude-haiku-4": {
-    input_per_million: 0.80,
-    output_per_million: 4.0,
-    cache_read_per_million: 0.08,
-    cache_write_per_million: 1.0,
-  },
-  "claude-3-5-haiku-20241022": {
-    input_per_million: 0.80,
-    output_per_million: 4.0,
-    cache_read_per_million: 0.08,
-    cache_write_per_million: 1.0,
-  },
-  "claude-3-haiku-20240307": {
-    input_per_million: 0.25,
-    output_per_million: 1.25,
-    cache_read_per_million: 0.03,
-    cache_write_per_million: 0.30,
-  },
-
-  // ── Claude 3 Opus (legacy) ───────────────────────────────────────────────
-  "claude-3-opus-20240229": {
-    input_per_million: 15.0,
-    output_per_million: 75.0,
-    cache_read_per_million: 1.50,
-    cache_write_per_million: 18.75,
-  },
-
-  // ── GLM (Z.AI / Zhipu) — for sessions routed through the Claude Code ──
-  // harness with a non-Anthropic model. Prices per-million tokens.
-  // Source: models.dev registry api.json (consulted 2026-06-20), matching
-  // the zhipuai provider entry. glm-5.2 advertises cache_read pricing and
-  // no cache_write (0); the claude-code transcript reports cache_write as 0
-  // for these models, so the value here is unused but kept for shape.
-  "glm-5.2": {
-    input_per_million: 1.4,
-    output_per_million: 4.4,
-    cache_read_per_million: 0.26,
-    cache_write_per_million: 0,
-  },
-  // Older GLM variants routed via the harness — conservative same-tier
-  // pricing where the exact value is uncertain; update from models.dev if
-  // cost attribution for these matters. glm-5/5.1/4.6/4.7 share the Z.AI
-  // coding-plan tier so we reuse glm-5.2's rates as a reasonable default.
-  "glm-5.1": {
-    input_per_million: 1.4,
-    output_per_million: 4.4,
-    cache_read_per_million: 0.26,
-    cache_write_per_million: 0,
-  },
-  "glm-5": {
-    input_per_million: 1.4,
-    output_per_million: 4.4,
-    cache_read_per_million: 0.26,
-    cache_write_per_million: 0,
-  },
-  "glm-4.7": {
-    input_per_million: 1.4,
-    output_per_million: 4.4,
-    cache_read_per_million: 0.26,
-    cache_write_per_million: 0,
-  },
-  "glm-4.6": {
-    input_per_million: 1.4,
-    output_per_million: 4.4,
-    cache_read_per_million: 0.26,
-    cache_write_per_million: 0,
-  },
-};
+/** Token-count blob mapped to UsageSummary keys. Same shape as the shared module's. */
+export type UsageForCost = SharedUsageForCost;
 
 /**
- * Look up a price entry for the given model id, case-insensitively.
- * Returns the UNKNOWN_PRICE sentinel (all zeros) if not found.
+ * Look up a price entry for the given model id (canonical id, org/model form,
+ * or dated alias), resolved through the shared normalizer. Returns the
+ * UNKNOWN_PRICE sentinel (all zeros, `unknown: true`) if not found. Signature
+ * preserved for the `transcript.ts` / `obs-hook.test.ts` call sites.
  */
 export function getModelPrice(modelId: string): ModelPrice & { unknown: boolean } {
-  if (!modelId) return { ...UNKNOWN_PRICE, unknown: true };
-  // Normalize: lowercase, strip an "org/" prefix (e.g. "zai-org/GLM-5.2" →
-  // "glm-5.2") so non-Anthropic models routed through the Claude Code
-  // harness still hit the price table.
-  const key = modelId.toLowerCase().replace(/^.*\//, "").trim();
-  const exact = PRICE_TABLE[key];
-  if (exact) return { ...exact, unknown: false };
-  // Partial prefix match: e.g. "claude-opus-4-8-20250514" → "claude-opus-4-8"
-  for (const [tableKey, price] of Object.entries(PRICE_TABLE)) {
-    if (key.startsWith(tableKey) || tableKey.startsWith(key)) {
-      return { ...price, unknown: false };
-    }
-  }
-  return { ...UNKNOWN_PRICE, unknown: true };
-}
-
-export interface UsageForCost {
-  input: number;
-  output: number;
-  cache_read: number;
-  cache_write: number;
+  return sharedGetModelPrice(modelId);
 }
 
 /**
- * Compute cost_total in USD for a given usage + model.
- * Returns 0 for unknown models (never throws).
+ * Compute cost_total in USD for a given usage + model id. Returns 0 for unknown
+ * models (never throws). Signature preserved.
  *
- * @param usage  Token counts mapped to UsageSummary keys
- * @param modelId  The `.message.model` string from the transcript
- * @returns  { cost_total: number; unknown_model: boolean }
+ * @param usage   Token counts mapped to UsageSummary keys.
+ * @param modelId The `.message.model` string from the transcript.
  */
 export function computeCost(
   usage: UsageForCost,
   modelId: string,
 ): { cost_total: number; unknown_model: boolean } {
-  try {
-    const price = getModelPrice(modelId);
-    if (price.unknown) {
-      return { cost_total: 0, unknown_model: true };
-    }
-    const cost_total =
-      ((usage.input ?? 0) * price.input_per_million +
-        (usage.output ?? 0) * price.output_per_million +
-        (usage.cache_read ?? 0) * price.cache_read_per_million +
-        (usage.cache_write ?? 0) * price.cache_write_per_million) /
-      1_000_000;
-    return { cost_total, unknown_model: false };
-  } catch {
-    return { cost_total: 0, unknown_model: true };
-  }
+  return sharedComputeCost(usage, modelId);
 }

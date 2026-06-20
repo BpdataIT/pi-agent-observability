@@ -56,6 +56,7 @@ import {
 
 import { parseNewTurns, buildAssistantMessagePayload, buildThinkingPayload } from "./transcript.ts";
 import { shouldSkipCursorHook } from "./cursor-detect.ts";
+import { providerForModelKey } from "../../shared/model-metadata.ts";
 
 // ---------------------------------------------------------------------------
 // .env loader (mirrors extension/pi-observability.ts:37)
@@ -161,19 +162,17 @@ function createEnvelope<T>(
  * Derive a provider id from the model id, so non-Anthropic models routed
  * through the Claude Code harness (e.g. glm-5.2 via Z.AI) are labeled
  * correctly in the dashboard instead of all reading "anthropic".
- * Falls back to "anthropic" for unrecognized ids — the harness's native
- * provider — to preserve prior behavior for Claude models.
+ *
+ * THIN WRAPPER — delegates the lookup to the shared provider table at
+ * `shared/model-metadata.ts` (`providerForModelKey`), and falls back to
+ * "anthropic" (this harness's native provider) only when the shared lookup
+ * returns undefined. That preserves prior behavior for every model currently
+ * routed: glm-* → zhipuai, gemini-* → google, gpt-*, o1, o3 → openai,
+ * deepseek* → deepseek, qwen* → qwen, kimi* → moonshotai, everything else
+ * → anthropic. Signature + call site (`handleStop` turnInfo) unchanged.
  */
 function providerForModel(modelId: string | undefined): string {
-  if (!modelId) return "anthropic";
-  const id = modelId.toLowerCase().replace(/^.*\//, "").trim();
-  if (id.startsWith("glm-"))      return "zhipuai";
-  if (id.startsWith("gemini-"))   return "google";
-  if (id.startsWith("gpt-") || /^o[13]/.test(id)) return "openai";
-  if (id.startsWith("deepseek"))  return "deepseek";
-  if (id.startsWith("qwen"))      return "qwen";
-  if (id.startsWith("kimi"))      return "moonshotai";
-  return "anthropic";
+  return providerForModelKey(modelId) ?? "anthropic";
 }
 
 // ---------------------------------------------------------------------------

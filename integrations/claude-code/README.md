@@ -240,26 +240,37 @@ file tracks this; pairing falls back to FIFO. Documented as a known limitation.
 
 ---
 
-## Cost computation
+## Cost & context window (shared model-metadata table)
 
-The transcript does not carry a `cost` field — only token counts and a model
-id. The bridge computes `cost_total` from `model-prices.ts`:
+Window, cost, and provider all resolve from the **single source of truth** at
+[`shared/model-metadata.ts`](../../shared/model-metadata.ts) (see
+[`shared/model-metadata.md`](../../shared/model-metadata.md)). The local
+[`model-context.ts`](./model-context.ts) (`contextWindowForModel`),
+[`model-prices.ts`](./model-prices.ts) (`getModelPrice` / `computeCost`), and
+`obs-hook.ts:providerForModel` are **thin wrappers** preserved for signature
+compatibility — their bodies delegate to the shared module, so `transcript.ts`
+/ `obs-hook.ts` / the test suite import them unchanged. Edit the **shared**
+table when a provider ships a new window or price; `just model-metadata-validate`
+checks it against the models.dev registry.
+
+The transcript carries no `cost` field — only token counts and a model id —
+so the bridge computes cost_total from the shared table:
 
 ```
 cost_total = (input * in_price + output * out_price
            + cache_read * cr_price + cache_write * cw_price) / 1_000_000
 ```
 
-Prices are in USD per million tokens. The table in `model-prices.ts` covers:
+Prices are in USD per million tokens. The shared table covers Claude + GLM
+(Z.AI / Zhipu) + Gemini + the new Qwen/Kimi families. Unknown models yield
+`cost_total: 0` + `unknown_model: true` (never throws) and a note in the debug
+log. Update the **shared** table (`shared/model-metadata.ts`) when Anthropic or
+another provider changes pricing.
 
-| Model | Input $/M | Output $/M | Cache read $/M | Cache write $/M |
-|---|---|---|---|---|
-| claude-opus-4-8 | $15.00 | $75.00 | $1.50 | $18.75 |
-| claude-sonnet-4-6 | $3.00 | $15.00 | $0.30 | $3.75 |
-| claude-haiku-4-5 | $0.80 | $4.00 | $0.08 | $1.00 |
-
-Unknown models yield `cost_total: 0` (never a crash) and a note in the debug
-log. Update `model-prices.ts` when Anthropic changes pricing.
+> The **pi extension** is intentionally NOT a consumer of the shared context
+> table — it reads the real window from `ctx.getContextUsage()` at runtime
+> (strictly more accurate). The shared table is the fallback for the
+> out-of-process integrations + the UI legacy path.
 
 ---
 
@@ -321,8 +332,8 @@ Expected: the session appears with `agent_name=claude-code`, non-zero
 - **Subagent sessions**: `SubagentStop` uses the parent `session_id` and
   `transcript_path` from the hook stdin; if Claude Code subagents carry a
   different `session_id`, they appear as their own lane (acceptable).
-- **Cost accuracy**: depends on `model-prices.ts` being current; update the
-  table at `integrations/claude-code/model-prices.ts` when prices change.
+- **Cost accuracy**: depends on the shared model-metadata table being current; update
+  `shared/model-metadata.ts` when prices change (then `just model-metadata-validate`).
 - **No retroactive backfill**: if the bridge was disabled during a run, those
   events are lost (same as the Pi extension).
 - **Cursor + pi dedup**: see [Cursor hooks and Pi delegation](#cursor-hooks-and-pi-delegation)

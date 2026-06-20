@@ -11,6 +11,7 @@ import * as fs from "node:fs";
 import { createDb, prepare, toRow, toSessionRow, rowToSession, rowToEvent } from "./db.js";
 import { MAX_REQUEST_BYTES } from "../../shared/types.js";
 import type { ObsEvent } from "../../shared/types.js";
+import { contextWindowForModelKey, DEFAULT_CONTEXT_WINDOW } from "../../shared/model-metadata.js";
 
 // ─── Config ─────────────────────────────────────────────────────────────────
 
@@ -382,6 +383,19 @@ async function handle(req: Request): Promise<Response> {
     } catch (err: any) {
       return jsonResponse({ error: err.message }, 500);
     }
+  }
+
+  // ── GET /models/context-window?model=<raw> ──────────────────────────────
+  // Backs the UI's legacy-session fallback. shared/model-metadata.ts is the
+  // single source of truth for model → context window; this endpoint lets the
+  // browser UI (which can't import the TS module directly) read it for legacy
+  // sessions whose events carry no stamped `context_window`. Auth matches the
+  // other GETs. Returns DEFAULT_CONTEXT_WINDOW when the model is unknown, so
+  // the UI always gets a sane denominator (never null).
+  if (pathname === "/models/context-window" && method === "GET") {
+    const model = url.searchParams.get("model") ?? "";
+    const context_window = contextWindowForModelKey(model) ?? DEFAULT_CONTEXT_WINDOW;
+    return jsonResponse({ context_window });
   }
 
   // ── GET /events/stream (SSE) ──────────────────────────────────────────
