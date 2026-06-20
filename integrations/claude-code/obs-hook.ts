@@ -154,6 +154,29 @@ function createEnvelope<T>(
 }
 
 // ---------------------------------------------------------------------------
+// Provider derivation
+// ---------------------------------------------------------------------------
+
+/**
+ * Derive a provider id from the model id, so non-Anthropic models routed
+ * through the Claude Code harness (e.g. glm-5.2 via Z.AI) are labeled
+ * correctly in the dashboard instead of all reading "anthropic".
+ * Falls back to "anthropic" for unrecognized ids — the harness's native
+ * provider — to preserve prior behavior for Claude models.
+ */
+function providerForModel(modelId: string | undefined): string {
+  if (!modelId) return "anthropic";
+  const id = modelId.toLowerCase().replace(/^.*\//, "").trim();
+  if (id.startsWith("glm-"))      return "zhipuai";
+  if (id.startsWith("gemini-"))   return "google";
+  if (id.startsWith("gpt-") || /^o[13]/.test(id)) return "openai";
+  if (id.startsWith("deepseek"))  return "deepseek";
+  if (id.startsWith("qwen"))      return "qwen";
+  if (id.startsWith("kimi"))      return "moonshotai";
+  return "anthropic";
+}
+
+// ---------------------------------------------------------------------------
 // Tool args truncation (mirrors extension/pi-observability.ts:81)
 // ---------------------------------------------------------------------------
 
@@ -576,7 +599,7 @@ async function handleStop(
 
   for (const turn of turns) {
     // Set model on session info for this turn's envelopes
-    const turnInfo: SessionInfo = { ...sessionInfo, provider: "anthropic", model: turn.model };
+    const turnInfo: SessionInfo = { ...sessionInfo, provider: providerForModel(turn.model), model: turn.model };
 
     // assistant_message
     const assistantPayload = buildAssistantMessagePayload(turn);

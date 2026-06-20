@@ -45,6 +45,7 @@ import {
   type ThinkingPayload,
 } from "../../shared/types.ts";
 import { computeCost } from "./model-prices.ts";
+import { contextWindowForModel } from "./model-context.ts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -367,6 +368,12 @@ export function buildAssistantMessagePayload(turn: AssistantTurn): AssistantMess
     stop_reason: turn.stop_reason,
     usage: turn.usage,
     latency_ms,
+    // Stamp the model's context window (resolved from the canonical model
+    // id) so the shared UI's context bar denominator is correct without
+    // relying on its MODEL_CONTEXT_WINDOWS regex table — which under-sizes
+    // non-Anthropic models like glm-5.2 (1M) routed through the Claude Code
+    // harness. Undefined for unknown ids → UI falls back to its own table.
+    context_window: contextWindowForModel(turn.model),
     // prefill_ms, generation_ms, output_tps intentionally omitted
   };
 }

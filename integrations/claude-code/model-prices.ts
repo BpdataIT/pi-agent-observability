@@ -111,6 +111,47 @@ const PRICE_TABLE: Record<string, ModelPrice> = {
     cache_read_per_million: 1.50,
     cache_write_per_million: 18.75,
   },
+
+  // ── GLM (Z.AI / Zhipu) — for sessions routed through the Claude Code ──
+  // harness with a non-Anthropic model. Prices per-million tokens.
+  // Source: models.dev registry api.json (consulted 2026-06-20), matching
+  // the zhipuai provider entry. glm-5.2 advertises cache_read pricing and
+  // no cache_write (0); the claude-code transcript reports cache_write as 0
+  // for these models, so the value here is unused but kept for shape.
+  "glm-5.2": {
+    input_per_million: 1.4,
+    output_per_million: 4.4,
+    cache_read_per_million: 0.26,
+    cache_write_per_million: 0,
+  },
+  // Older GLM variants routed via the harness — conservative same-tier
+  // pricing where the exact value is uncertain; update from models.dev if
+  // cost attribution for these matters. glm-5/5.1/4.6/4.7 share the Z.AI
+  // coding-plan tier so we reuse glm-5.2's rates as a reasonable default.
+  "glm-5.1": {
+    input_per_million: 1.4,
+    output_per_million: 4.4,
+    cache_read_per_million: 0.26,
+    cache_write_per_million: 0,
+  },
+  "glm-5": {
+    input_per_million: 1.4,
+    output_per_million: 4.4,
+    cache_read_per_million: 0.26,
+    cache_write_per_million: 0,
+  },
+  "glm-4.7": {
+    input_per_million: 1.4,
+    output_per_million: 4.4,
+    cache_read_per_million: 0.26,
+    cache_write_per_million: 0,
+  },
+  "glm-4.6": {
+    input_per_million: 1.4,
+    output_per_million: 4.4,
+    cache_read_per_million: 0.26,
+    cache_write_per_million: 0,
+  },
 };
 
 /**
@@ -119,7 +160,10 @@ const PRICE_TABLE: Record<string, ModelPrice> = {
  */
 export function getModelPrice(modelId: string): ModelPrice & { unknown: boolean } {
   if (!modelId) return { ...UNKNOWN_PRICE, unknown: true };
-  const key = modelId.toLowerCase().trim();
+  // Normalize: lowercase, strip an "org/" prefix (e.g. "zai-org/GLM-5.2" →
+  // "glm-5.2") so non-Anthropic models routed through the Claude Code
+  // harness still hit the price table.
+  const key = modelId.toLowerCase().replace(/^.*\//, "").trim();
   const exact = PRICE_TABLE[key];
   if (exact) return { ...exact, unknown: false };
   // Partial prefix match: e.g. "claude-opus-4-8-20250514" → "claude-opus-4-8"
