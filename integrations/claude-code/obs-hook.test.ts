@@ -306,13 +306,14 @@ describe("model-prices", () => {
   });
 
   test("cost computation formula is correct", () => {
-    // Manually verify: claude-opus-4-8 at 15/75/1.5/18.75 per million
-    // input=1000000, output=0, cache_read=0, cache_write=0 → $15.00
+    // Manually verify: claude-opus-4-8 at 5/25/0.5/6.25 per million (Anthropic
+    // API rate as of 2026-06-20, per the models.dev registry). input=1000000,
+    // output=0, cache_read=0, cache_write=0 → $5.00
     const { cost_total } = computeCost(
       { input: 1_000_000, output: 0, cache_read: 0, cache_write: 0 },
       "claude-opus-4-8",
     );
-    expect(cost_total).toBeCloseTo(15.0, 6);
+    expect(cost_total).toBeCloseTo(5.0, 6);
   });
 });
 

@@ -162,11 +162,15 @@ uses it as the pending/failure fallback for the legacy fetch.
 | `just model-metadata-selftest` | Lossy-pair + cost-snapshot gate (Stories 2.2/3.3). Exits non-zero on any failure. |
 | `just model-metadata-validate` | Runs the self-test, cross-checks `MODEL_TABLE` against the models.dev registry (offline → WARNING + skip, exit 0), and against the distinct model set in `db/obs.db`. Exits non-zero only on a self-test failure. |
 
-**Registry drift is informational, not fatal.** The shared table intentionally
-reproduces the pre-migration integration tables for legacy models (the Phase 2/3
-no-op constraint). For example `claude-opus-4-8` keeps `15/75` though the
-registry lists `5/25`; the validator reports that drift so a maintainer sees it,
-but does not fail. New models (Qwen, Kimi) must match the registry.
+**Registry drift is informational, not fatal.** The shared table is trued to
+the models.dev registry (consulted 2026-06-20) using each model's canonical
+first-party provider entry (anthropic/, google/, openai/, zai/ for Z.AI
+international, deepseek/). Where a model has multiple provider listings at
+different price points (e.g. zhipuai/glm-5.1 list price vs zai/glm-5.1 post-cut),
+we use the endpoint most users actually route through. The validator reports
+any residual drift (e.g. context-window caps like DeepSeek's 64k that mirror
+pi's own conservative cap rather than the registry's physical max) so a
+maintainer sees it, but does not fail. New models must match the registry.
 
 **Registry source:** `https://models.dev/api.json`, consulted 2026-06-20. The
 validator caches it to `/tmp/models-dev-api.json` for the run; set

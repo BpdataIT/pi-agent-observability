@@ -134,28 +134,44 @@ export function normalizeModelKey(raw: string | undefined): string {
 //
 // Prices are per-million tokens in USD. Context windows are in tokens.
 //
-// Source priorities when this table was assembled (2026-06-20):
-//   - For models the pre-migration integrations already priced/sized, the
-//     values here EXACTLY reproduce the old local tables so Phases 2/3 are
-//     pure no-op body-swaps (a normalization bug flipping 1M → 128k is the
-//     exact failure this consolidation exists to prevent).
-//   - For NEW models (Qwen, Kimi), values come from the models.dev registry
-//     api.json (consulted 2026-06-20).
-//   - `just model-metadata-validate` reports any drift between this table and
-//     the registry; flagged drift is informational (the no-op constraint wins
-//     for legacy models — e.g. claude-opus-4-8 keeps its local 15/75 even
-//     though the registry lists 5/25).
+// Source: the models.dev registry api.json (consulted 2026-06-20), using the
+// canonical first-party provider entry for each model (anthropic/, google/,
+// openai/, zai/ for Z.AI international, deepseek/). For models with multiple
+// provider listings at different price points (e.g. zhipuai/glm-5.1 list vs
+// zai/glm-5.1 post-cut), we use the endpoint most users actually route
+// through (zai/ for GLM, since opencode-go and the international Z.AI API
+// hit that).
+//
+// `just model-metadata-validate` cross-checks this table against the
+// registry and reports drift. Run it after any provider reprices.
 
 // Reused price constants keep the table readable and DRY.
-const P_CLAUDE_OPUS: ModelPrice = {
+// Claude 4.x Opus (4-5/4-6/4-7/4-8) all share Anthropic's $5/$25 API rate
+// (cache_read $0.5, cache_write $6.25) — verified via anthropic/ entries in
+// the models.dev registry 2026-06-20. (The pre-migration local table wrongly
+// used the legacy 3-Opus $15/$75 rate for 4.x Opus; corrected here.)
+const P_CLAUDE_OPUS4: ModelPrice = {
+  input_per_million: 5.0, output_per_million: 25.0,
+  cache_read_per_million: 0.5, cache_write_per_million: 6.25,
+};
+// Legacy Claude 3 Opus (claude-3-opus-20240229) keeps its original $15/$75 rate.
+const P_CLAUDE_3_OPUS: ModelPrice = {
   input_per_million: 15.0, output_per_million: 75.0,
   cache_read_per_million: 1.5, cache_write_per_million: 18.75,
 };
+// Claude Sonnet 3.5/3.7/4.x all share $3/$15 (cr $0.3, cw $3.75).
 const P_CLAUDE_SONNET: ModelPrice = {
   input_per_million: 3.0, output_per_million: 15.0,
   cache_read_per_million: 0.3, cache_write_per_million: 3.75,
 };
+// Claude Haiku 4-5: $1/$5 (cr $0.1, cw $1.25) — anthropic/ registry entry.
+// (The pre-migration local table wrongly used the 3.5-Haiku $0.8/$4 rate; corrected.)
 const P_CLAUDE_HAIKU4: ModelPrice = {
+  input_per_million: 1.0, output_per_million: 5.0,
+  cache_read_per_million: 0.1, cache_write_per_million: 1.25,
+};
+// Legacy Claude 3.5 Haiku / 3 Haiku keep their original rates.
+const P_CLAUDE_3_5_HAIKU: ModelPrice = {
   input_per_million: 0.8, output_per_million: 4.0,
   cache_read_per_million: 0.08, cache_write_per_million: 1.0,
 };
@@ -163,12 +179,23 @@ const P_CLAUDE_3_HAIKU: ModelPrice = {
   input_per_million: 0.25, output_per_million: 1.25,
   cache_read_per_million: 0.03, cache_write_per_million: 0.3,
 };
-// GLM (Z.AI / Zhipu) coding-tier rates. cache_write = 0 is honest: Z.AI reports
-// no cache-write billing and the claude-code transcript reports
+// GLM (Z.AI / Zhipu) — per-model rates from the zai/ (international Z.AI)
+// entries in the models.dev registry (consulted 2026-06-20). GLM-5.2 and
+// GLM-5.1 share the current $1.4/$4.4 coding-tier rate; older GLM-5 and
+// GLM-4.6/4.7 have their own lower rates. cache_write = 0 is honest: Z.AI
+// reports no cache-write billing and the claude-code transcript reports
 // cache_creation_input_tokens as 0 for GLM models.
-const P_GLM: ModelPrice = {
+const P_GLM_52: ModelPrice = {
   input_per_million: 1.4, output_per_million: 4.4,
   cache_read_per_million: 0.26, cache_write_per_million: 0,
+};
+const P_GLM_5: ModelPrice = {
+  input_per_million: 1.0, output_per_million: 3.2,
+  cache_read_per_million: 0.2, cache_write_per_million: 0,
+};
+const P_GLM_4: ModelPrice = {
+  input_per_million: 0.6, output_per_million: 2.2,
+  cache_read_per_million: 0.11, cache_write_per_million: 0,
 };
 
 function gemini(in_: number, out: number, cr: number): ModelPrice {
@@ -189,33 +216,32 @@ const PROVIDER = {
 
 export const MODEL_TABLE: Record<string, ModelMeta> = {
   // ── Claude (Anthropic) ───────────────────────────────────────────────────
-  // Windows: opus-4-8 + sonnet-4-6 ship 1M by default; other Claude 4.x/3.x
-  // are 200k (mirrors the pre-migration cc/UI tables). Prices reproduce the
-  // pre-migration cc table EXACTLY (note: the models.dev registry lists newer
-  // opus-4-5/4-6/4-7/4-8 at 5/25, but the local table used 15/75 — kept here
-  // for the no-op; `just model-metadata-validate` reports the drift).
-  "claude-opus-4-8": { context_window: 1_000_000, price: P_CLAUDE_OPUS, provider: PROVIDER.anthropic },
-  "claude-opus-4": { context_window: 200_000, price: P_CLAUDE_OPUS, provider: PROVIDER.anthropic },
+  // Windows: opus-4-6/4-7/4-8 + sonnet-4-6 ship 1M by default; other Claude
+  // 4.x/3.x are 200k. Prices from anthropic/ registry entries (2026-06-20):
+  // 4.x Opus $5/$25, Sonnet $3/$15, Haiku 4-5 $1/$5; legacy 3-Opus $15/$75,
+  // 3.5-Haiku $0.8/$4, 3-Haiku $0.25/$1.25.
+  "claude-opus-4-8": { context_window: 1_000_000, price: P_CLAUDE_OPUS4, provider: PROVIDER.anthropic },
+  "claude-opus-4": { context_window: 200_000, price: P_CLAUDE_OPUS4, provider: PROVIDER.anthropic },
   "claude-sonnet-4-6": { context_window: 1_000_000, price: P_CLAUDE_SONNET, provider: PROVIDER.anthropic },
   "claude-sonnet-4": { context_window: 200_000, price: P_CLAUDE_SONNET, provider: PROVIDER.anthropic },
   "claude-3-5-sonnet": { context_window: 200_000, price: P_CLAUDE_SONNET, provider: PROVIDER.anthropic }, // claude-3-5-sonnet-20241022 / -20240620
   "claude-3-7-sonnet": { context_window: 200_000, price: P_CLAUDE_SONNET, provider: PROVIDER.anthropic }, // claude-3-7-sonnet-20250219
   "claude-haiku-4-5": { context_window: 200_000, price: P_CLAUDE_HAIKU4, provider: PROVIDER.anthropic },
   "claude-haiku-4": { context_window: 200_000, price: P_CLAUDE_HAIKU4, provider: PROVIDER.anthropic },
-  "claude-3-5-haiku": { context_window: 200_000, price: P_CLAUDE_HAIKU4, provider: PROVIDER.anthropic }, // claude-3-5-haiku-20241022
+  "claude-3-5-haiku": { context_window: 200_000, price: P_CLAUDE_3_5_HAIKU, provider: PROVIDER.anthropic }, // claude-3-5-haiku-20241022
   "claude-3-haiku": { context_window: 200_000, price: P_CLAUDE_3_HAIKU, provider: PROVIDER.anthropic }, // claude-3-haiku-20240307
-  "claude-3-opus": { context_window: 200_000, price: P_CLAUDE_OPUS, provider: PROVIDER.anthropic }, // claude-3-opus-20240229
+  "claude-3-opus": { context_window: 200_000, price: P_CLAUDE_3_OPUS, provider: PROVIDER.anthropic }, // claude-3-opus-20240229
 
   // ── GLM (Z.AI / Zhipu) ───────────────────────────────────────────────────
-  // glm-5.2 advertises a 1M window (verified via models.dev, 2026-06-20). The
-  // older GLM variants reuse glm-5.2's coding-tier rates as a conservative
-  // default (the pre-migration cc table did the same); the registry has
-  // distinct per-variant rates, reported by the validator as drift.
-  "glm-5.2": { context_window: 1_000_000, price: P_GLM, provider: PROVIDER.zhipuai },
-  "glm-5.1": { context_window: 200_000, price: P_GLM, provider: PROVIDER.zhipuai },
-  "glm-5": { context_window: 204_800, price: P_GLM, provider: PROVIDER.zhipuai },
-  "glm-4.7": { context_window: 200_000, price: P_GLM, provider: PROVIDER.zhipuai },
-  "glm-4.6": { context_window: 204_800, price: P_GLM, provider: PROVIDER.zhipuai },
+  // glm-5.2 advertises a 1M window; glm-5.1/4.6/4.7 are 200k; glm-5 is
+  // 204800. Prices: glm-5.2/5.1 share the $1.4/$4.4 coding-tier rate; glm-5
+  // is $1.0/$3.2; glm-4.6/4.7 are $0.6/$2.2. cache_write = 0 (Z.AI reports no
+  // cache-write billing).
+  "glm-5.2": { context_window: 1_000_000, price: P_GLM_52, provider: PROVIDER.zhipuai },
+  "glm-5.1": { context_window: 200_000, price: P_GLM_52, provider: PROVIDER.zhipuai },
+  "glm-5": { context_window: 204_800, price: P_GLM_5, provider: PROVIDER.zhipuai },
+  "glm-4.7": { context_window: 200_000, price: P_GLM_4, provider: PROVIDER.zhipuai },
+  "glm-4.6": { context_window: 204_800, price: P_GLM_4, provider: PROVIDER.zhipuai },
 
   // ── Gemini (Google) ──────────────────────────────────────────────────────
   // All current Gemini 2.x/3.x variants advertise a 1M window; 1.5 Pro is 2M.
@@ -241,19 +267,25 @@ export const MODEL_TABLE: Record<string, ModelMeta> = {
   "gemini-1.5-pro": { context_window: 2_000_000, price: gemini(1.25, 5.0, 0.31), provider: PROVIDER.google },
 
   // ── GPT / o-series (OpenAI) ──────────────────────────────────────────────
-  // Carried for context-window + provider coverage only. price = UNKNOWN_PRICE
-  // preserves the historical "cost_total: 0" behavior (the pre-migration
-  // integrations never priced OpenAI models). Windows mirror the UI/cc tables.
-  "gpt-5": { context_window: 400_000, price: UNKNOWN_PRICE, provider: PROVIDER.openai },
-  "gpt-4o": { context_window: 128_000, price: UNKNOWN_PRICE, provider: PROVIDER.openai },
-  "gpt-4": { context_window: 128_000, price: UNKNOWN_PRICE, provider: PROVIDER.openai },
-  "o1": { context_window: 200_000, price: UNKNOWN_PRICE, provider: PROVIDER.openai },
-  "o3": { context_window: 200_000, price: UNKNOWN_PRICE, provider: PROVIDER.openai },
+  // Windows + prices from the openai/ registry entries (consulted
+  // 2026-06-20). gpt-5 $1.25/$10 (cr $0.125), gpt-4o $2.5/$10 (cr $1.25),
+  // o1 $15/$60 (cr $7.5), o3 $2/$8 (cr $0.5). cache_write = 0 (OpenAI reports
+  // no cache-write billing). Windows mirror the registry.
+  "gpt-5": { context_window: 400_000, price: { input_per_million: 1.25, output_per_million: 10.0, cache_read_per_million: 0.125, cache_write_per_million: 0 }, provider: PROVIDER.openai },
+  "gpt-4o": { context_window: 128_000, price: { input_per_million: 2.5, output_per_million: 10.0, cache_read_per_million: 1.25, cache_write_per_million: 0 }, provider: PROVIDER.openai },
+  "gpt-4": { context_window: 128_000, price: UNKNOWN_PRICE, provider: PROVIDER.openai }, // legacy gpt-4 (32k variant) — registry price $30/$60 not wired (rarely routed via these harnesses)
+  "o1": { context_window: 200_000, price: { input_per_million: 15.0, output_per_million: 60.0, cache_read_per_million: 7.5, cache_write_per_million: 0 }, provider: PROVIDER.openai },
+  "o3": { context_window: 200_000, price: { input_per_million: 2.0, output_per_million: 8.0, cache_read_per_million: 0.5, cache_write_per_million: 0 }, provider: PROVIDER.openai },
 
   // ── DeepSeek ─────────────────────────────────────────────────────────────
   // 64k mirrors pi's own context-bar cap for DeepSeek (verified against a live
-  // deepseek-v4-flash session). price = UNKNOWN_PRICE (not priced historically).
-  "deepseek": { context_window: 64_000, price: UNKNOWN_PRICE, provider: PROVIDER.deepseek },
+  // deepseek-v4-flash session). Prices from the deepseek/ registry entries
+  // (consulted 2026-06-20): deepseek-v3 $0.287/$1.147, deepseek-r1
+  // $0.574/$2.294 (131072 window). cache_write = 0. The generic "deepseek"
+  // key uses v3 rates as the conservative default for the family.
+  "deepseek": { context_window: 64_000, price: { input_per_million: 0.287, output_per_million: 1.147, cache_read_per_million: 0, cache_write_per_million: 0 }, provider: PROVIDER.deepseek },
+  "deepseek-v3": { context_window: 65_536, price: { input_per_million: 0.287, output_per_million: 1.147, cache_read_per_million: 0, cache_write_per_million: 0 }, provider: PROVIDER.deepseek },
+  "deepseek-r1": { context_window: 131_072, price: { input_per_million: 0.574, output_per_million: 2.294, cache_read_per_million: 0, cache_write_per_million: 0 }, provider: PROVIDER.deepseek },
 
   // ── Qwen (Alibaba) — NEW, sourced from models.dev (2026-06-20) ───────────
   // cache_read/cache_write are 0 where the registry omits them.

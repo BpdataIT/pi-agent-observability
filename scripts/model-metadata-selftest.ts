@@ -72,7 +72,7 @@ export const SELF_TEST_CASES: SelfTestCase[] = [
     raw: "claude-opus-4-6-thinking",
     key: "claude-opus-4-6",
     provider: "anthropic",
-    price: { input: 15, output: 75 },
+    price: { input: 5, output: 25 },
   },
   {
     name: "zai-org/GLM-5.2 (org-prefix strip) → glm-5.2, 1M, zhipuai",
@@ -93,12 +93,12 @@ export const SELF_TEST_CASES: SelfTestCase[] = [
   },
   { name: "glm-4.6 → 204_800", raw: "glm-4.6", key: "glm-4.6", window: 204_800 },
   {
-    name: "claude-opus-4-8 → 1M, anthropic, in 15/out 75",
+    name: "claude-opus-4-8 → 1M, anthropic, in 5/out 25",
     raw: "claude-opus-4-8",
     key: "claude-opus-4-8",
     window: 1_000_000,
     provider: "anthropic",
-    price: { input: 15, output: 75 },
+    price: { input: 5, output: 25 },
   },
   {
     name: "dated 'claude-opus-4-8-20250514' strips to claude-opus-4-8 → 1M",
@@ -106,7 +106,7 @@ export const SELF_TEST_CASES: SelfTestCase[] = [
     key: "claude-opus-4-8",
     window: 1_000_000,
     provider: "anthropic",
-    price: { input: 15, output: 75 },
+    price: { input: 5, output: 25 },
   },
   { name: "claude-sonnet-4-6 → 1M", raw: "claude-sonnet-4-6", key: "claude-sonnet-4-6", window: 1_000_000 },
   {
@@ -134,10 +134,10 @@ export const COST_SNAPSHOTS: Array<{
     expected: (39 * 1.5 + 1635 * 9.0 + 267072 * 0.15) / 1_000_000,
   },
   {
-    name: "cc claude-opus-4-8 rate (in 15 / out 75 / cr 1.5 / cw 18.75)",
+    name: "cc claude-opus-4-8 rate (in 5 / out 25 / cr 0.5 / cw 6.25)",
     usage: { input: 39, output: 1635, cache_read: 267072, cache_write: 100 },
     raw: "claude-opus-4-8",
-    expected: (39 * 15 + 1635 * 75 + 267072 * 1.5 + 100 * 18.75) / 1_000_000,
+    expected: (39 * 5 + 1635 * 25 + 267072 * 0.5 + 100 * 6.25) / 1_000_000,
   },
   {
     name: "glm-5.2 sample (≈0.0767) — in 1.4 / out 4.4 / cr 0.26 / cw 0",
