@@ -7,11 +7,18 @@ dashboard** as Pi and Claude Code agents.
 
 **NO server or dashboard changes are required.**
 
-> ⚠️ **Cost & tokens are not available.** agy exposes no token usage or cost in
-> its hook payloads *or* its JSONL transcript (verified by inspecting the binary
-> and live payloads). `assistant_message.usage` is therefore emitted as zeros —
-> the session lane, prompts, thinking, tool calls and results all populate, but
-> the cost/token columns read 0. See [Known limitations](#known-limitations).
+> 💡 **Cost & tokens ARE available** (new turns). agy exposes no token usage
+> via hooks or its JSONL transcript, so the bridge decodes the per-turn counts
+> from the protobuf `gen_metadata` table in the conversation SQLite db
+> (`~/.gemini/antigravity-cli/conversations/<id>.db`) and stamps real
+> `usage.input` / `output` / `cost_total` / `context_window` onto each
+> `assistant_message`. The context bar, cost, and token columns populate for
+> new turns. **Legacy agy sessions recorded before the decoder shipped stay
+> zero** (no retroactive decode unless you run the optional backfill — see
+> [Backfill](#optional-backfill-for-legacy-agy-sessions)). See
+> [Known limitations](#known-limitations) and
+> [`usage-decoder.md`](./usage-decoder.md) for the reverse-engineered-protobuf
+> caveats.
 
 ---
 
@@ -33,8 +40,17 @@ Two things differ from the [Claude Code bridge](../claude-code/README.md):
    - prompts / assistant text / thinking are read from the JSONL transcript
      (`transcriptPath`) rather than from a dedicated hook.
 
-Cross-event state (monotonic `seq`, transcript byte offset, "session_start
-emitted" flag, learned model label) is persisted to
+**Per-turn token usage** is decoded from the conversation's `gen_metadata`
+SQLite table (no hooks/transcript carry it) by [`usage-decoder.ts`](./usage-decoder.ts).
+Each `PostInvocation`/`Stop`, the bridge opens the `.db` read-only, decodes the
+newest `gen_metadata` rows past a persisted `usageIdxOffset`, pairs them to the
+drained assistant turns, and stamps `usage` + `context_window` (cost via
+[`model-prices.ts`](./model-prices.ts)). All `.db` access is read-only and
+never throws — a locked/corrupt/missing db degrades to zero usage for that
+turn and the hook still exits 0.
+
+Cross-event state (monotonic `seq`, transcript byte offset, `usageIdxOffset`,
+"session_start emitted" flag, learned model label) is persisted to
 `${TMPDIR}/pi-obs-agy/<conversationId>/` so it survives the per-hook process
 boundary. The `seq` counter uses the same atomic append-byte scheme as the
 Claude Code bridge.
@@ -61,9 +77,30 @@ with the absolute path to this repo, and remove the `_instructions` key. Or use
 the justfile helper:
 
 ```bash
-just agy-install        # writes ~/.gemini/config/hooks.json pointing at this repo
+just agy-install        # writes ~/.gemini/config/hooks.json pointing at the hook source
 just agy-uninstall      # removes it
 ```
+
+**Single source of truth.** The hook commands point at the path
+`pi install git:github.com/BpdataIT/pi-agent-observability@main` updates
+(`AGY_HOOKS_SRC`, default
+`~/.pi/agent/git/github.com/BpdataIT/pi-agent-observability` — the pi-installed
+BpdataIT clone), so **one `pi install` refreshes both the pi extension and the
+agy hooks**. The legacy `github.com/disler` clone is no longer referenced.
+
+To point the hooks at a different clone (e.g. your working repo during
+development), override the source:
+
+```bash
+AGY_HOOKS_SRC="$PWD/pi-agent-observability" just agy-install   # → working tree
+AGY_HOOKS_SRC="$PWD/pi-agent-observability" just agy-hooks-print  # preview first
+```
+
+> **Uncommitted work note.** New agy bridge code (the `context_window` stamp
+> via `model-context.ts`, and the `gen_metadata` usage decoder) lives in the
+> working tree and only reaches the installed hook path once committed, pushed,
+> and pulled by `pi install`. To exercise that new code locally before
+> committing, set `AGY_HOOKS_SRC` to your working repo as above.
 
 If you already have hooks in `~/.gemini/config/hooks.json`, merge the five
 event entries by hand rather than overwriting.
@@ -145,21 +182,92 @@ in the dashboard. Verified: ids match across hook and transcript.
 State lives under `${TMPDIR}/pi-obs-agy/<conversationId>/`:
 
 | File | Purpose |
-|---|---|
+|---||
 | `seq` | Append-byte atomic counter; fileSize = next seq value |
-| `state.json` | `transcriptOffset`, `bootEmitted`, `model`, `firstRunLogged` |
-| `debug.log` | First hook payload, model-learning, errors |
+| `state.json` | `transcriptOffset`, `usageIdxOffset`, `bootEmitted`, `model`, `firstRunLogged` |
+| `debug.log` | First hook payload, model-learning, usage decode errors/mismatches, errors |
 | `spool/*.json` | Events spooled when the server was unreachable (auto-pruned to 20) |
+
+`usageIdxOffset` is the `gen_metadata` idx to decode from on the next hook —
+the incremental analog of `transcriptOffset`. Only rows with `idx >=
+usageIdxOffset` are decoded, so the per-turn protobuf is read once. It resets
+to 0 if the `.db` shrank (conversation reset), mirroring `transcriptOffset`'s
+resilience.
+
+## Decoding token usage (`gen_metadata`)
+
+agy records per-call token counts only in the protobuf `gen_metadata` table of
+`~/.gemini/antigravity-cli/conversations/<id>.db` — no `.proto` ships with agy,
+so [`usage-decoder.ts`](./usage-decoder.ts) reverse-engineers the field map.
+The confirmed map (verified across the live corpus, agy 1.0.10):
+
+| field | meaning |
+|---|---|
+| `f1.f4.f5` | prompt / **input** tokens (context prefix) |
+| `f1.f4.f10` | candidates / **output** tokens (response) |
+| `f1.f4.f9` | thoughts / thinking tokens (decoded, not billed) |
+| `f1.f4.f3` | total generated = `f9 + f10` (invariant: holds on 100% of rows) |
+| `f1.f21` | human model label (e.g. `Gemini 3.5 Flash (High)`) |
+
+The invariant `f3 == f9 + f10` (total = thinking + candidates) holds on 100% of
+2 226 corpus rows, which pins the output/thinking split. See
+[`usage-decoder.md`](./usage-decoder.md) for the full derivation, the Gemini
+sub-trajectory monotonicity caveat, and the open-db strategy.
+
+### Re-validating after an agy bump
+
+```bash
+just agy-usage-validate   # sweeps all conversation .db files; checks the
+                           # f3==f9+f10 invariant + input/output field map
+```
+
+If the `VERDICT` refutes the map, dump one row's field tree with
+`bun integrations/antigravity/usage-decoder.ts <db> --idx 0` and re-derive
+`GEN_METADATA_FIELD_MAP`, then update `usage-decoder.md`.
+
+### Debug CLI
+
+```bash
+bun integrations/antigravity/usage-decoder.ts <db-or-uuid>              # dump every row
+bun integrations/antigravity/usage-decoder.ts <db-or-uuid> --idx 5       # one row
+bun integrations/antigravity/usage-decoder.ts <db-or-uuid> --match-content  # pair with transcript text
+bun integrations/antigravity/usage-decoder.ts <db-or-uuid> --json        # machine-readable
+```
+
+## Cost (Gemini price table)
+
+[`model-prices.ts`](./model-prices.ts) mirrors
+`integrations/claude-code/model-prices.ts` (same `ModelPrice` /
+`getModelPrice` / `computeCost` shape), keyed by the **normalized model label**
+(the same string `contextWindowForLabel` keys on). Prices per-million tokens
+are sourced from the Google AI for Developers pricing page (consulted
+2026-06-20) and are trivially correctable constants. Unknown labels yield
+`cost_total: 0` + a debug log (never throw). **Note:** thinking tokens (`f9`)
+are decoded but intentionally not billed, so cost is a conservative lower bound
+for Gemini High-effort turns — see [`usage-decoder.md`](./usage-decoder.md).
 
 ---
 
 ## Known limitations
 
-- **No cost or tokens.** Neither the hook payloads nor `transcript_full.jsonl`
-  carry usage. `assistant_message.usage` is all zeros and the dashboard
-  cost/token columns read 0. The only place per-turn tokens live is the
-  protobuf-encoded SQLite at `~/.gemini/antigravity-cli/conversations/<id>.db`;
-  decoding that is out of scope for this bridge (future work).
+- **Reverse-engineered protobuf usage.** Token counts come from decoding agy's
+  `gen_metadata` SQLite blobs (no `.proto` ships with agy). The field map is
+  empirical — verified against the live corpus as of agy 1.0.10 (`just
+  agy-usage-validate`) — and may need re-derivation after an agy version bump.
+  Decode failures degrade to zero usage (never throw). See
+  [`usage-decoder.md`](./usage-decoder.md).
+- **Legacy sessions stay zero by default.** agy sessions recorded in the
+  dashboard before the decoder shipped keep zero usage (no retroactive decode).
+  New turns populate. Optional retroactive decode: see
+  [Backfill](#optional-backfill-for-legacy-agy-sessions).
+- **Thinking tokens not billed.** Gemini thinking (`f1.f4.f9`) is decoded but
+  excluded from `output`/cost (conservative lower bound for High-effort turns).
+- **Timing columns mostly empty.** `latency_ms` / `prefill_ms` / `generation_ms`
+  / `output_tps` are omitted unless derivable — agy's `executor_metadata`/
+  `steps` carry no per-turn timestamps, so they are not fabricated.
+- **cache_read / cache_write are 0.** agy reports the whole prefix as one input
+  number (`f5`); it does not split cached vs uncached. The context-bar
+  numerator (`input + cache_read + cache_write`) still equals the real prefix.
 - **Model id is a human label.** agy never emits a model identifier to hooks;
   the bridge scrapes the label (e.g. `Gemini 3.5 Flash (High)`) from the
   transcript's `USER_SETTINGS_CHANGE` block when present, else leaves it unset.
@@ -188,3 +296,28 @@ Hook events: `PreToolUse`, `PostToolUse`, `PreInvocation`, `PostInvocation`,
   initialNumSteps, transcriptPath, artifactDirectoryPath, workspacePaths`.
 - `Stop`: `conversationId, executionNum, fullyIdle, terminationReason, error,
   transcriptPath, workspacePaths`.
+
+The `gen_metadata` protobuf schema (input `f1.f4.f5`, output `f1.f4.f10`,
+thinking `f1.f4.f9`, total `f1.f4.f3`, label `f1.f21`) was also verified
+against agy 1.0.10 across 48 conversation `.db` files — see
+[`usage-decoder.md`](./usage-decoder.md) and `just agy-usage-validate`.
+
+---
+
+## Optional: backfill for legacy agy sessions
+
+Legacy agy sessions already in the dashboard (recorded before the usage
+decoder shipped) keep zero usage by default. The optional backfill script
+re-decodes each conversation's `gen_metadata` and writes the corrected
+`assistant_message.usage` into `db/obs.db`:
+
+```bash
+# Stop the server first, then:  (opt-in; legacy sessions otherwise stay zero)
+bun scripts/agy-backfill-usage.ts --session <conversationId> --confirm
+bun scripts/agy-backfill-usage.ts --all --confirm                # every agy session
+```
+
+It is **idempotent** (skips turns whose `usage.total_tokens > 0`) and gated
+behind `--confirm`. This is intentionally not run automatically — it writes
+directly to `db/obs.db`, so stop the observability server first to avoid a
+write conflict.

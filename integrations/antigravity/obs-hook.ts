@@ -52,6 +52,7 @@ import {
   type ToolCallPayload,
   type ToolResultPayload,
   type CustomPayload,
+  type UsageSummary,
 } from "../../shared/types.ts";
 
 import {
@@ -69,9 +70,22 @@ import {
   stableStringify,
   buildAssistantMessagePayload,
   buildThinkingPayload,
+  type TurnTiming,
 } from "./transcript.ts";
+import {
+  decodeNewUsage,
+  resolveDbPath,
+  type UsageRecord,
+} from "./usage-decoder.ts";
+import { computeCost } from "./model-prices.ts";
 
 const PROVIDER = "google";
+
+/** Derive the conversation .db path from a conversationId. agy stores one
+ *  SQLite db per conversation at this fixed location. */
+function conversationDbPath(conversationId: string): string {
+  return resolveDbPath(conversationId);
+}
 
 // ---------------------------------------------------------------------------
 // .env loader (mirrors the Claude Code bridge / pi-observability.ts)
@@ -311,6 +325,12 @@ function ensureBoot(
  * Drain new transcript entries → user_message/agent_start + assistant_message/
  * thinking. Tool-output entries are skipped here (PostToolUse emits tool_result).
  * Advances state.transcriptOffset and learns the model label.
+ *
+ * Per-turn usage: decodes gen_metadata rows with idx >= state.usageIdxOffset
+ * (read-only .db access) and pairs them to the NEW assistant turns by ordinal
+ * order (Nth new assistant turn ↔ Nth new usage row). Mismatch (row count !=
+ * turn count) leaves unpaired turns at zero usage rather than mis-assigning.
+ * .db read failures degrade to zero usage + a debug log; the hook still exits 0.
  */
 function drainTranscript(
   hook: Record<string, any>,
@@ -328,6 +348,30 @@ function drainTranscript(
   }
   state.transcriptOffset = newOffset;
 
+  const conversationId: string = hook.conversationId ?? "";
+  const assistantTurns = turns.filter((t) => t.kind === "assistant");
+  // Decode new usage rows for pairing — only when there are new assistant
+  // turns to stamp (no point opening the .db otherwise).
+  const usageForTurn =
+    assistantTurns.length > 0 ? decodeUsageForTurns(conversationId, state, stateDir) : [];
+
+  if (assistantTurns.length > 0 && usageForTurn.length !== assistantTurns.length) {
+    debugLog(stateDir, "usage_turn_mismatch", {
+      assistantTurns: assistantTurns.length,
+      usageRows: usageForTurn.length,
+      usageIdxOffset: state.usageIdxOffset,
+      pairing: "end-aligned (latest turn gets latest usage)",
+    });
+  }
+  // End-align pairing: when there are fewer usage rows than assistant turns
+  // (a gen_metadata row can be missing for a non-model step, or the first turn
+  // lacks a row), the LATEST turn still gets the LATEST usage — important
+  // because the dashboard's context bar / latest stats read the most recent
+  // assistant_message. Unpaired turns fall at the start (where the first turn's
+  // input is ~0 anyway).
+  const usageShift = Math.max(0, assistantTurns.length - usageForTurn.length);
+
+  let assistantIdx = 0;
   for (const turn of turns) {
     if (turn.model) state.model = turn.model;
     const info = sessionInfoFrom(hook, config, state.model);
@@ -345,12 +389,89 @@ function drainTranscript(
       out.push(createEnvelope("agent_start", agentPayload, info, nextSeq(stateDir)));
     } else if (turn.kind === "assistant") {
       const toolCallIds = turn.toolCalls.map((tc) => deriveToolCallId(tc.name, tc.args));
-      const assistantPayload = buildAssistantMessagePayload(turn, toolCallIds);
+      const usageSlot = assistantIdx - usageShift;
+      const { usage, timing } = usageSlot >= 0 ? (usageForTurn[usageSlot] ?? { usage: undefined, timing: undefined }) : { usage: undefined, timing: undefined };
+      const assistantPayload = buildAssistantMessagePayload(turn, toolCallIds, state.model, usage, timing);
       out.push(createEnvelope("assistant_message", assistantPayload, info, nextSeq(stateDir)));
       const thinkingPayload = buildThinkingPayload(turn);
       if (thinkingPayload) out.push(createEnvelope("thinking", thinkingPayload, info, nextSeq(stateDir)));
+      assistantIdx++;
     }
   }
+}
+
+/**
+ * Decode new gen_metadata rows past state.usageIdxOffset and return one
+ * { usage, timing } per NEW assistant turn, paired by ordinal order. Advances
+ * state.usageIdxOffset to one past the last decoded row. Never throws; on any
+ * .db failure returns an empty list (turns fall back to zero usage) and leaves
+ * the offset unchanged so the next hook retries.
+ */
+function decodeUsageForTurns(
+  conversationId: string,
+  state: SessionState,
+  stateDir: string,
+): Array<{ usage: UsageSummary | undefined; timing: TurnTiming | undefined }> {
+  if (!conversationId) return [];
+  const dbPath = conversationDbPath(conversationId);
+  let records: UsageRecord[] | null = null;
+  try {
+    records = decodeNewUsage(dbPath, state.usageIdxOffset, "ro");
+  } catch (err) {
+    debugLog(stateDir, "usage_decode_error", {
+      conversationId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return [];
+  }
+  if (records === null) {
+    // .db missing/locked (WAL) — leave the offset; turns get zero usage.
+    // Expected on the first hook of a brand-new conversation (no .db yet) and
+    // on lock contention; subsequent hooks retry.
+    return [];
+  }
+  if (records.length === 0) return [];
+
+  // Advance the offset past the rows we consumed (snapshots already filtered).
+  // If the .db shrank (conversation reset) so every idx is below the offset,
+  // reset to 0 — mirrors transcriptOffset's resilience.
+  const maxIdx = records.reduce((m, r) => (r.idx > m ? r.idx : m), -1);
+  if (maxIdx < state.usageIdxOffset) {
+    debugLog(stateDir, "usage_db_shrunk", { oldOffset: state.usageIdxOffset, maxIdx });
+    state.usageIdxOffset = 0;
+  } else {
+    state.usageIdxOffset = maxIdx + 1;
+  }
+
+  const out: Array<{ usage: UsageSummary | undefined; timing: TurnTiming | undefined }> = [];
+  for (const rec of records) {
+    if (rec.decode_error) {
+      debugLog(stateDir, "usage_row_decode_error", { idx: rec.idx, error: rec.decode_error });
+      out.push({ usage: undefined, timing: undefined });
+      continue;
+    }
+    // input=f5 (prompt prefix), output=f10 (candidates); cache stays 0 (agy
+    // doesn't split cached vs uncached). total_tokens = input + output.
+    const { cost_total, unknown_model } = computeCost(
+      { input: rec.input, output: rec.output, cache_read: 0, cache_write: 0 },
+      rec.model_label || state.model,
+    );
+    if (unknown_model && rec.model_label) {
+      debugLog(stateDir, "usage_unknown_model_cost_zero", { model_label: rec.model_label });
+    }
+    out.push({
+      usage: {
+        input: rec.input,
+        output: rec.output,
+        cache_read: 0,
+        cache_write: 0,
+        total_tokens: rec.input + rec.output,
+        cost_total,
+      },
+      timing: undefined, // latency_ms derivable from transcript ts later; omitted for now
+    });
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------

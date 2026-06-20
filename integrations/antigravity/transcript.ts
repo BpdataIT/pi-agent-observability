@@ -28,6 +28,7 @@ import {
   type ThinkingPayload,
   type UsageSummary,
 } from "../../shared/types.ts";
+import { contextWindowForLabel } from "./model-context.ts";
 
 // ---------------------------------------------------------------------------
 // Raw entry types
@@ -155,8 +156,14 @@ export function extractModelLabel(content: string): string | undefined {
 }
 
 // ---------------------------------------------------------------------------
-// Incremental tail parsing
+// Parsed turn (with optional per-turn usage + timing from gen_metadata)
 // ---------------------------------------------------------------------------
+
+/** Optional per-turn timing surfaced alongside usage (latency from transcript). */
+export interface TurnTiming {
+  latency_ms?: number;
+}
+
 
 export interface ParseResult {
   turns: ParsedTurn[];
@@ -264,24 +271,54 @@ function classifyEntry(e: TranscriptEntry): ParsedTurn {
 // Payload builders
 // ---------------------------------------------------------------------------
 
-/** All-zero usage — agy exposes no token/cost data via hooks or transcript. */
+/** All-zero usage — the fallback when a turn has no decoded usage (legacy
+ *  sessions, decode failure, or a snapshot-only/missing gen_metadata row). */
 export function zeroUsage(): UsageSummary {
   return { input: 0, output: 0, cache_read: 0, cache_write: 0, total_tokens: 0, cost_total: 0 };
 }
 
+/**
+ * Build an AssistantMessagePayload from a parsed turn.
+ *
+ * `usage` (optional): when supplied by the gen_metadata decoder, stamped as-is
+ *   (cost_total already computed via model-prices.ts). When absent, falls back
+ *   to `zeroUsage()` — legacy sessions and decode failures stay zero.
+ * `timing` (optional): per-turn timing. Only `latency_ms` (derived from
+ *   transcript timestamps) is populated; prefill_ms/generation_ms/output_tps
+ *   are omitted (not derivable from agy without per-turn timestamps) —
+ *   "omit rather than fabricate", matching the Claude Code bridge convention.
+ *
+ * `context_window` is always stamped via model-context.ts when derivable
+ * (independent of whether usage decoded).
+ */
 export function buildAssistantMessagePayload(
   turn: ParsedTurn,
   toolCallIds: string[],
+  modelLabel?: string,
+  usage?: UsageSummary,
+  timing?: TurnTiming,
 ): AssistantMessagePayload {
   const text = truncateToBytes(turn.text, MAX_TEXT_FIELD).text;
   const thinking = truncateToBytes(turn.thinking, MAX_TEXT_FIELD).text;
-  return {
+  const payload: AssistantMessagePayload = {
     text,
     thinking,
     tool_call_ids: toolCallIds,
     stop_reason: turn.toolCalls.length > 0 ? "toolUse" : "stop",
-    usage: zeroUsage(),
+    usage: usage ?? zeroUsage(),
+    // Stamp the model's context window (resolved from the agy display label)
+    // so the shared UI's context bar denominator is correct without relying
+    // on its MODEL_CONTEXT_WINDOWS regex table, which doesn't match agy's
+    // human labels like "Gemini 3.5 Flash (High)". Undefined for unknown
+    // labels → UI falls back to its own table / default.
+    context_window: contextWindowForLabel(modelLabel),
   };
+  if (timing?.latency_ms !== undefined && timing.latency_ms > 0) {
+    payload.latency_ms = timing.latency_ms;
+  }
+  // prefill_ms / generation_ms / output_tps intentionally omitted — agy's
+  // executor_metadata/steps carry no per-turn timestamps to derive them.
+  return payload;
 }
 
 export function buildThinkingPayload(turn: ParsedTurn): ThinkingPayload | null {

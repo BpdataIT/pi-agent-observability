@@ -14,7 +14,7 @@
  *     conversational content (prompts, thinking, assistant text).
  *
  * State layout on disk:
- *   ${stateDir}/state.json   — { transcriptOffset, bootEmitted, model, firstRunLogged }
+ *   ${stateDir}/state.json   — { transcriptOffset, usageIdxOffset, bootEmitted, model, firstRunLogged }
  *   ${stateDir}/seq          — binary append counter: fileSize = nextSeq value
  *
  * Seq strategy is identical to the Claude Code bridge: each allocation appends
@@ -28,6 +28,10 @@ import * as path from "node:path";
 export interface SessionState {
   /** Byte offset into transcript_full.jsonl; tail from here on the next hook. */
   transcriptOffset: number;
+  /** gen_metadata idx to decode from (incremental, mirrors transcriptOffset).
+   *  Only rows with idx >= this are decoded on each PostInvocation/Stop so the
+   *  per-turn usage protobuf is read once. Resets to 0 if the .db shrank. */
+  usageIdxOffset: number;
   /** True once we've emitted the synthetic session_start for this conversation. */
   bootEmitted: boolean;
   /** Most recently observed human model label (e.g. "Gemini 3.5 Flash (High)"). */
@@ -38,6 +42,7 @@ export interface SessionState {
 
 const DEFAULT_STATE: SessionState = {
   transcriptOffset: 0,
+  usageIdxOffset: 0,
   bootEmitted: false,
   model: "",
   firstRunLogged: false,
@@ -91,6 +96,7 @@ export function loadState(stateDir: string): SessionState {
     const parsed = JSON.parse(raw);
     return {
       transcriptOffset: typeof parsed.transcriptOffset === "number" ? parsed.transcriptOffset : 0,
+      usageIdxOffset: typeof parsed.usageIdxOffset === "number" ? parsed.usageIdxOffset : 0,
       bootEmitted: parsed.bootEmitted === true,
       model: typeof parsed.model === "string" ? parsed.model : "",
       firstRunLogged: parsed.firstRunLogged === true,

@@ -4,6 +4,14 @@ set shell := ["bash", "--login", "-e", "-o", "pipefail", "-c"]
 obs_port := env_var_or_default("OBS_PORT", "43190")
 obs_token := env_var_or_default("OBS_AUTH_TOKEN", "devtoken")
 obs_url := env_var_or_default("OBS_SERVER_URL", "http://127.0.0.1:" + obs_port)
+
+# Root of the agy hook source the hooks.json commands point at.
+#
+# Defaults to the pi-installed BpdataIT clone — the SAME path `pi install
+# git:github.com/BpdataIT/pi-agent-observability@main` updates — so one `pi
+# install` refreshes both the pi extension AND the agy hooks. Override with
+# AGY_HOOKS_SRC=... (e.g. your working repo $PWD) to point elsewhere.
+agy_hooks_src := env_var_or_default("AGY_HOOKS_SRC", "~/.pi/agent/git/github.com/BpdataIT/pi-agent-observability")
 steelman_port := env_var_or_default("STEELMAN_PORT", "45210")
 steelman_web_port := env_var_or_default("STEELMAN_WEB_PORT", "51730")
 steelman_api_target := env_var_or_default("STEELMAN_API_TARGET", "http://127.0.0.1:" + steelman_port)
@@ -198,22 +206,45 @@ cc-hooks-print:
   echo ""
   sed "s|/ABS/PATH|${abs_path}|g; /_instructions/d" "${abs_path}/integrations/claude-code/settings.template.json"
 
-# Print the Antigravity (agy) hooks.json with this repo's absolute path filled in.
+# Print the Antigravity (agy) hooks.json with the resolved hook source path filled in.
 agy-hooks-print:
   #!/usr/bin/env bash
   set -euo pipefail
-  abs_path="$PWD"
+  # Resolve AGY_HOOKS_SRC (default = pi-installed BpdataIT clone) so the printed
+  # hooks point at the same path `pi install git:github.com/BpdataIT/...@main`
+  # updates. Expand ~ via bash, then realpath so the command is absolute.
+  src="{{agy_hooks_src}}"
+  abs_path="$(eval echo "${src}")"
+  if [ ! -d "${abs_path}" ]; then
+    echo "✗ AGY_HOOKS_SRC does not resolve to a directory: ${abs_path}" >&2
+    echo "  Set AGY_HOOKS_SRC to your pi-agent-observability clone" >&2
+    echo "  (default ~/.pi/agent/git/github.com/BpdataIT/pi-agent-observability)" >&2
+    exit 1
+  fi
   echo "# Install to ~/.gemini/config/hooks.json (NOT ~/.gemini/antigravity-cli/hooks.json)"
+  echo "# agy hook source: ${abs_path}"
   echo "# Current OBS_AUTH_TOKEN: {{obs_token}}  OBS_SERVER_URL: {{obs_url}}"
   echo ""
   sed "s|/ABS/PATH|${abs_path}|g; /_instructions/d" "${abs_path}/integrations/antigravity/hooks.template.json"
 
 # Install the Antigravity bridge hooks to ~/.gemini/config/hooks.json (the backend-synced path).
+#
+# Points the hooks at the path `pi install git:github.com/BpdataIT/...@main`
+# updates (AGY_HOOKS_SRC, default the pi-installed BpdataIT clone) so a single
+# `pi install` refreshes both the extension and the agy hooks. Override with
+# AGY_HOOKS_SRC=<path> (e.g. your working repo) to point elsewhere.
 # Refuses to clobber an existing hooks.json — back it up / merge by hand first.
 agy-install:
   #!/usr/bin/env bash
   set -euo pipefail
-  abs_path="$PWD"
+  src="{{agy_hooks_src}}"
+  abs_path="$(eval echo "${src}")"
+  if [ ! -d "${abs_path}" ]; then
+    echo "✗ AGY_HOOKS_SRC does not resolve to a directory: ${abs_path}" >&2
+    echo "  Set AGY_HOOKS_SRC to your pi-agent-observability clone" >&2
+    echo "  (default ~/.pi/agent/git/github.com/BpdataIT/pi-agent-observability)" >&2
+    exit 1
+  fi
   dest="$HOME/.gemini/config/hooks.json"
   mkdir -p "$(dirname "$dest")"
   if [ -e "$dest" ]; then
@@ -224,10 +255,12 @@ agy-install:
   fi
   sed "s|/ABS/PATH|${abs_path}|g; /_instructions/d" "${abs_path}/integrations/antigravity/hooks.template.json" > "$dest"
   echo "✓ Installed agy hooks → $dest"
+  echo "  hook source: ${abs_path}"
   echo "  Now run agy with OBS_AUTH_TOKEN / OBS_SERVER_URL exported (or in .env)."
 
 # Remove the Antigravity bridge hooks from ~/.gemini/config/hooks.json.
-# Only removes the file if it points at this repo's obs-hook.ts (won't delete unrelated hooks).
+# Only removes the file if it points at this bridge's obs-hook.ts (won't delete
+# unrelated hooks), regardless of which clone path it references.
 agy-uninstall:
   #!/usr/bin/env bash
   set -euo pipefail
@@ -240,6 +273,13 @@ agy-uninstall:
     echo "✗ $dest does not reference this bridge — leaving it untouched."
     exit 1
   fi
+
+# Run the agy gen_metadata usage decoder across every conversation .db and
+# report coverage, input-field monotonicity, output-vs-text correlation, and
+# model/effort variance. GATE for confirming GEN_METADATA_FIELD_MAP before
+# trusting it in the live hook. Findings: integrations/antigravity/usage-decoder.md
+agy-usage-validate:
+  bun scripts/agy-usage-validate.ts
 
 # ═══════════════════════════════════════════════════════════════════════════
 #  EXTRA  —  build, validate, backup
