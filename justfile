@@ -306,7 +306,8 @@ droid-hooks-print:
   echo ""
   sed "s|/ABS/PATH|${abs_path}|g; s|bun /|${bun_bin} /|g; /_instructions/d" "${abs_path}/integrations/droid/hooks.template.json"
 
-# Install the Factory Droid bridge hooks to ~/.factory/hooks.json.
+# Install the Factory Droid bridge hooks into ~/.factory/settings.json (required)
+# and ~/.factory/hooks.json (reference copy).
 droid-install:
   #!/usr/bin/env bash
   set -euo pipefail
@@ -323,30 +324,51 @@ droid-install:
     echo "✗ bun not found on PATH" >&2
     exit 1
   fi
-  dest="$HOME/.factory/hooks.json"
-  mkdir -p "$(dirname "$dest")"
-  if [ -e "$dest" ]; then
-    echo "✗ $dest already exists — refusing to overwrite."
-    echo "  Back it up or merge the hook entries from integrations/droid/hooks.template.json by hand."
-    echo "  (Preview with: just droid-hooks-print)"
+  hooks_json="$(sed "s|/ABS/PATH|${abs_path}|g; s|bun /|${bun_bin} /|g; /_instructions/d" "${abs_path}/integrations/droid/hooks.template.json")"
+  settings="$HOME/.factory/settings.json"
+  hooks_file="$HOME/.factory/hooks.json"
+  mkdir -p "$(dirname "$settings")"
+  if ! command -v jq >/dev/null 2>&1; then
+    echo "✗ jq not found on PATH (required for droid-install)" >&2
     exit 1
   fi
-  sed "s|/ABS/PATH|${abs_path}|g; s|bun /|${bun_bin} /|g; /_instructions/d" "${abs_path}/integrations/droid/hooks.template.json" > "$dest"
-  echo "✓ Installed droid hooks → $dest"
+  hooks_only="$(printf '%s' "$hooks_json" | jq '.hooks')"
+  if [ -f "$settings" ]; then
+    jq --argjson hooks "$hooks_only" '.hooksDisabled = false | .hooks = $hooks' "$settings" > "${settings}.tmp"
+  else
+    jq -n --argjson hooks "$hooks_only" '{hooksDisabled: false, hooks: $hooks}' > "${settings}.tmp"
+  fi
+  mv "${settings}.tmp" "$settings"
+  printf '%s\n' "$hooks_json" | jq '.' > "$hooks_file"
+  echo "✓ Installed droid hooks → $settings (hooks key)"
+  echo "✓ Wrote reference copy → $hooks_file"
   echo "  hook source: ${abs_path}"
-  echo "  Now run droid with OBS_AUTH_TOKEN / OBS_SERVER_URL exported (or in .env)."
+  echo "  Restart droid after install. Auth loads from repo .env if present."
 
-# Remove the Factory Droid bridge hooks from ~/.factory/hooks.json.
+# Remove the Factory Droid bridge hooks from ~/.factory/settings.json.
 droid-uninstall:
   #!/usr/bin/env bash
   set -euo pipefail
-  dest="$HOME/.factory/hooks.json"
-  if [ ! -e "$dest" ]; then echo "Nothing to remove ($dest absent)."; exit 0; fi
-  if grep -q "integrations/droid/obs-hook.ts" "$dest"; then
-    rm -f "$dest"
-    echo "✓ Removed $dest"
-  else
-    echo "✗ $dest does not reference this bridge — leaving it untouched."
+  settings="$HOME/.factory/settings.json"
+  hooks_file="$HOME/.factory/hooks.json"
+  removed=0
+  if [ -f "$settings" ] && grep -q "integrations/droid/obs-hook.ts" "$settings"; then
+    if ! command -v jq >/dev/null 2>&1; then
+      echo "✗ jq not found on PATH (required for droid-uninstall)" >&2
+      exit 1
+    fi
+    jq 'del(.hooks)' "$settings" > "${settings}.tmp"
+    mv "${settings}.tmp" "$settings"
+    echo "✓ Removed hooks from $settings"
+    removed=1
+  fi
+  if [ -f "$hooks_file" ] && grep -q "integrations/droid/obs-hook.ts" "$hooks_file"; then
+    rm -f "$hooks_file"
+    echo "✓ Removed $hooks_file"
+    removed=1
+  fi
+  if [ "$removed" -eq 0 ]; then
+    echo "✗ No droid bridge hooks found in ~/.factory/settings.json or hooks.json"
     exit 1
   fi
 

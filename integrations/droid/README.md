@@ -13,9 +13,10 @@ USD cost.
 ## How it works
 
 Droid fires a separate short-lived process per lifecycle event (a shell command
-registered in `~/.factory/hooks.json`). This bridge reads a JSON payload from
-stdin, maps it to `ObsEventEnvelope`s, and POSTs them to the observability
-server.
+registered in `~/.factory/settings.json` under the `hooks` key). Droid 0.153+
+loads hooks from settings; `hooks.json` alone is not enough on this version.
+This bridge reads a JSON payload from stdin, maps it to `ObsEventEnvelope`s,
+and POSTs them to the observability server.
 
 Cross-event state (monotonic `seq`, transcript byte offset, open tool ids,
 cumulative usage snapshot) is persisted to `${TMPDIR}/pi-obs-droid/<session_id>/`.
@@ -47,22 +48,24 @@ export OBS_TAG=tag1,tag2              # optional
 export OBS_NAME=droid                 # optional, default "droid"
 ```
 
-The bridge auto-loads `.env` / `.env.local` from the project `cwd` (same as
-the Claude Code bridge).
+The bridge auto-loads `.env` / `.env.local` from cwd, the repo root, and
+`~/.env` (hook subprocesses do not inherit your shell exports).
 
 ### 2. Register the hooks
 
-Copy the hooks block from `hooks.template.json` into:
+`just droid-install` merges the hooks block into:
 
-- **Global:** `~/.factory/hooks.json`
-- **Project:** `<project>/.factory/hooks.json`
+- **Required:** `~/.factory/settings.json` → `"hooks"` key + `"hooksDisabled": false`
+- **Reference copy:** `~/.factory/hooks.json`
 
-Or use `just droid-hooks-print` / `just droid-install`. Replace `/ABS/PATH`
-with the absolute path to this repo. For project-relative paths, Factory
-supports `$FACTORY_PROJECT_DIR`.
+Or copy manually from `hooks.template.json` (replace `/ABS/PATH`, use full
+`bun` path e.g. `/opt/homebrew/bin/bun`). Project-level:
+`<project>/.factory/settings.json`.
 
-Unlike Claude Code, hooks are **not** nested inside `settings.json` — Droid
-keeps them in a standalone `hooks.json`.
+Ensure `hooksDisabled` is `false` in `/hooks` or `/settings`.
+
+Unlike Claude Code, Droid keeps hooks in `settings.json` (with optional
+`hooks.json` mirror), not `.claude/settings.json`.
 
 ### 3. Run Droid
 
